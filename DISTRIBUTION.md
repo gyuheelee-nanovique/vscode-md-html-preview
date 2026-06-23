@@ -20,25 +20,30 @@ There are two machine roles:
 
 ## Consumer machine — first-time install
 
+Bootstrap by cloning the (private) repo straight into the VS Code extensions folder with
+`gh` (which handles auth). After that, `dist/install.sh` / `install.ps1` (now present in
+the cloned folder) handle all future updates.
+
 **macOS / Linux**
 ```bash
-# one-time auth (private repo)
-gh auth login
-# install into ~/.vscode/extensions and reload VS Code
-bash <(curl -fsSL https://raw.githubusercontent.com/gyuheelee-nanovique/vscode-md-html-preview/main/dist/install.sh)
-# …or, if you already cloned the repo somewhere:
-#   ./dist/install.sh
+gh auth login   # one-time, for the private repo
+gh repo clone gyuheelee-nanovique/vscode-md-html-preview \
+  "$HOME/.vscode/extensions/nanovique.vscode-md-html-preview"
 ```
 
 **Windows (PowerShell)**
 ```powershell
 gh auth login
-# clone the repo somewhere, then:
-powershell -ExecutionPolicy Bypass -File .\dist\install.ps1
+gh repo clone gyuheelee-nanovique/vscode-md-html-preview `
+  "$env:USERPROFILE\.vscode\extensions\nanovique.vscode-md-html-preview"
 ```
 
 Then restart VS Code. `Markdown HTML Preview (Paper)` should appear in the Extensions
 list and its commands in the palette.
+
+> No GitHub CLI? Use plain git with the same destination path:
+> `git clone https://github.com/gyuheelee-nanovique/vscode-md-html-preview.git <dest>`
+> (you'll be prompted for credentials / a PAT since the repo is private).
 
 ---
 
