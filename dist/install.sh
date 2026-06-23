@@ -15,8 +15,7 @@ DEST="$HOME/.vscode/extensions/nanovique.vscode-md-html-preview"
 if [ -d "$DEST/.git" ]; then
   echo "Updating $DEST"
   git -C "$DEST" fetch --quiet origin
-  BR="$(git -C "$DEST" rev-parse --abbrev-ref HEAD)"
-  git -C "$DEST" reset --hard "origin/$BR"
+  git -C "$DEST" reset --hard '@{u}'   # match the tracked upstream (origin/<branch>)
 else
   echo "Cloning into $DEST"
   rm -rf "$DEST"

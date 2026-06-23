@@ -14,8 +14,7 @@ $Dest = Join-Path $env:USERPROFILE ".vscode\extensions\nanovique.vscode-md-html-
 if (Test-Path (Join-Path $Dest ".git")) {
   Write-Host "Updating $Dest"
   git -C $Dest fetch --quiet origin
-  $br = (git -C $Dest rev-parse --abbrev-ref HEAD).Trim()
-  git -C $Dest reset --hard "origin/$br"
+  git -C $Dest reset --hard '@{u}'   # match the tracked upstream (origin/<branch>)
 } else {
   Write-Host "Cloning into $Dest"
   if (Test-Path $Dest) { Remove-Item -Recurse -Force $Dest }
