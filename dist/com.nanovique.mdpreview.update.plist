@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  macOS auto-update LaunchAgent for CONSUMER machines.
+  Pulls the latest extension every 6 hours and at login by re-running install.sh.
+
+  Install:
+    cp dist/com.nanovique.mdpreview.update.plist ~/Library/LaunchAgents/
+    launchctl load ~/Library/LaunchAgents/com.nanovique.mdpreview.update.plist
+  Remove:
+    launchctl unload ~/Library/LaunchAgents/com.nanovique.mdpreview.update.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.nanovique.mdpreview.update</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>-lc</string>
+    <string>"$HOME/.vscode/extensions/nanovique.vscode-md-html-preview/dist/install.sh"</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>21600</integer>
+  <key>StandardOutPath</key>
+  <string>/tmp/mdpreview-update.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/mdpreview-update.log</string>
+</dict>
+</plist>

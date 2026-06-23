@@ -1,0 +1,8 @@
+node_modules/
+*.vsix
+*.log
+.DS_Store
+
+# NOTE: out/ is intentionally TRACKED (committed) so consumer machines can run the
+# extension by cloning alone — no Node/build step required. Build on the dev machine
+# with `npm run compile` (or `dist/release.sh`) before committing.

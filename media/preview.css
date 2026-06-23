@@ -1,0 +1,431 @@
+/*
+ * Canonical stylesheet, shared by the live preview and the standalone export.
+ *
+ * The base reading + A4 print rules are kept byte-for-byte in sync with the CSS in
+ * tools/pdf_to_html.py so the preview is a faithful proxy for the exported document.
+ * The block at the end ("Preview / general-Markdown additions") styles constructs the
+ * paper pipeline never emits (code, blockquotes, lists, rules, links).
+ */
+
+@font-face {
+    font-family: 'Presentation';
+    src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2404@1.0/Freesentation-4Regular.woff2') format('woff2');
+    font-weight: 400;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Presentation';
+    src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2404@1.0/Freesentation-7Bold.woff2') format('woff2');
+    font-weight: 700;
+    font-display: swap;
+}
+
+:root {
+    color-scheme: light;
+    --bg: #fbfbf8;
+    --ink: #20201d;
+    --muted: #66645d;
+    --line: #dedbd2;
+    --soft: #f1efe8;
+    --accent: #cf4520;        /* 다홍 (vermilion) — inline code & block-quote text */
+}
+
+* { box-sizing: border-box; }
+
+html {
+    background: var(--bg);
+    font-size: 17px;
+}
+
+body {
+    margin: 0;
+    color: var(--ink);
+    background: var(--bg);
+    font-family: 'Presentation', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    line-height: 1.78;
+    letter-spacing: 0;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+}
+
+main {
+    width: min(100%, 920px);
+    margin: 0 auto;
+    padding: 56px 28px 88px;
+}
+
+article { width: 100%; }
+
+h1, h2, h3, h4, h5, h6 {
+    margin: 2.4rem 0 0.9rem;
+    line-height: 1.38;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: #181815;
+    overflow-wrap: anywhere;
+}
+
+h1 {
+    margin-top: 0.7rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1.25rem;
+    border-bottom: 1px solid var(--line);
+    font-size: 2rem;
+}
+
+h2 {
+    padding-top: 0.4rem;
+    font-size: 1.45rem;
+}
+
+p {
+    margin: 1rem 0;
+    font-size: 1rem;
+}
+
+.figure { margin: 2rem 0; }
+
+.figure img {
+    display: block;
+    width: auto;
+    max-width: 100%;
+    height: auto;
+    max-height: 86vh;
+    margin: 0 auto;
+}
+
+.table-scroll {
+    width: 100%;
+    margin: 1.8rem 0;
+    overflow-x: auto;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+}
+
+table {
+    width: 100%;
+    min-width: 780px;
+    border-collapse: collapse;
+    font-size: 0.88rem;
+    line-height: 1.45;
+}
+
+table caption {
+    caption-side: top;
+    padding: 0 0 0.75rem;
+    text-align: left;
+    color: var(--muted);
+    font-size: 0.94rem;
+}
+
+th, td {
+    padding: 0.55rem 0.65rem;
+    border-bottom: 1px solid #e8e5dd;
+    text-align: left;
+    vertical-align: top;
+}
+
+th {
+    background: var(--soft);
+    font-weight: 400;
+    color: #312f2a;
+}
+
+tr:last-child td { border-bottom: 0; }
+
+.reference {
+    color: var(--muted);
+    font-size: 0.92rem;
+    line-height: 1.62;
+    word-break: normal;
+    overflow-wrap: anywhere;
+}
+
+.references {
+    margin-top: 2.6rem;
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+    padding: 0.35rem 0;
+}
+
+.references summary {
+    cursor: pointer;
+    list-style-position: outside;
+    padding: 0.95rem 0;
+    font-size: 1.45rem;
+    line-height: 1.38;
+    color: #181815;
+}
+
+.references summary::marker { color: var(--muted); }
+
+.references[open] summary { margin-bottom: 0.9rem; }
+
+.math-tex { white-space: nowrap; }
+.math-block {
+    margin: 1rem 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0.2rem 0;
+}
+
+.katex { font-size: 1em; }
+
+@media (max-width: 640px) {
+    html { font-size: 16px; }
+    main { padding: 34px 18px 64px; }
+    h1 { font-size: 1.55rem; }
+    h2 { font-size: 1.22rem; }
+}
+
+@page {
+    size: A4;
+    margin: 18mm 16mm 20mm;
+}
+
+@media print {
+    html,
+    body {
+        width: 210mm;
+        min-height: 297mm;
+        background: #fff;
+        color: #111;
+        font-size: 10.5pt;
+        line-height: 1.55;
+    }
+
+    body {
+        margin: 0;
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+    }
+
+    main {
+        width: auto;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        color: #111;
+        page-break-after: avoid;
+        break-after: avoid-page;
+        page-break-inside: avoid;
+        break-inside: avoid;
+    }
+
+    h1 {
+        margin: 0 0 9mm;
+        padding-bottom: 5mm;
+        border-bottom: 0.4pt solid #999;
+        font-size: 18pt;
+        line-height: 1.28;
+    }
+
+    h2 {
+        margin: 9mm 0 3.5mm;
+        padding-top: 0;
+        font-size: 13.5pt;
+        line-height: 1.32;
+    }
+
+    p {
+        margin: 0 0 3.4mm;
+        font-size: 10.5pt;
+        orphans: 3;
+        widows: 3;
+    }
+
+    .figure {
+        margin: 6mm 0;
+        page-break-inside: avoid;
+        break-inside: avoid-page;
+    }
+
+    .figure img {
+        max-width: 100%;
+        max-height: 180mm;
+        object-fit: contain;
+    }
+
+    .table-scroll {
+        margin: 6mm 0;
+        overflow: visible;
+        border-top: 0.4pt solid #999;
+        border-bottom: 0.4pt solid #999;
+        page-break-inside: avoid;
+        break-inside: avoid-page;
+    }
+
+    table {
+        width: 100%;
+        min-width: 0;
+        font-size: 7.2pt;
+        line-height: 1.25;
+    }
+
+    table caption {
+        padding-bottom: 2.5mm;
+        color: #333;
+        font-size: 9pt;
+    }
+
+    th, td {
+        padding: 1.5mm 1.4mm;
+        border-bottom: 0.3pt solid #ddd;
+    }
+
+    th {
+        background: #f3f3f3;
+        color: #111;
+    }
+
+    thead { display: table-header-group; }
+
+    tr {
+        page-break-inside: avoid;
+        break-inside: avoid-page;
+    }
+
+    .references {
+        margin-top: 9mm;
+        border-top: 0.4pt solid #999;
+        border-bottom: 0;
+        padding-top: 4mm;
+    }
+
+    .references summary {
+        display: block;
+        padding: 0 0 4mm;
+        font-size: 13.5pt;
+        cursor: default;
+    }
+
+    .references summary::marker { content: ''; }
+
+    .reference {
+        color: #333;
+        font-size: 8.3pt;
+        line-height: 1.38;
+        margin-bottom: 2mm;
+    }
+
+    .math-block {
+        overflow: visible;
+        page-break-inside: avoid;
+        break-inside: avoid-page;
+    }
+
+    .math-tex,
+    .katex {
+        white-space: normal;
+    }
+}
+
+/* ------------------------------------------------------------------ *
+ * Preview / general-Markdown additions
+ * (constructs the docling paper pipeline does not emit)
+ * ------------------------------------------------------------------ */
+
+a {
+    color: #3a5f8a;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+strong { font-weight: 700; }
+em { font-style: italic; }
+
+/* Inline code chip: pale beige background, vermilion text, rounded outline. */
+code {
+    font-family: 'SFMono-Regular', ui-monospace, 'Menlo', 'Consolas', monospace;
+    font-size: 0.88em;
+    color: var(--accent);
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.1em 0.35em;
+}
+
+pre {
+    margin: 1.4rem 0;
+    padding: 0.95rem 1.1rem;
+    overflow-x: auto;
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    line-height: 1.55;
+}
+
+pre code {
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 0.86rem;
+}
+
+/* highlight.js: keep token colors from the theme, but use our beige <pre> background
+   (override the theme's white fill and its own padding). */
+pre code.hljs {
+    padding: 0;
+    background: transparent;
+}
+
+/* Block-quote shares the inline-code chip theme: beige fill, vermilion text,
+   rounded rectangle with the same neutral outline. */
+blockquote {
+    margin: 1.4rem 0;
+    padding: 0.6rem 1.1rem;
+    color: var(--accent);
+    background: var(--soft);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font-size: 0.86rem;          /* match the multi-line code block (= first-level reading size) */
+}
+
+blockquote p {
+    margin: 0.6rem 0;
+    font-size: 0.86rem;
+    color: inherit;
+}
+
+ul, ol {
+    margin: 1rem 0;
+    padding-left: 1.6rem;
+}
+
+li { margin: 0.35rem 0; }
+
+hr {
+    margin: 2.2rem 0;
+    border: 0;
+    border-top: 1px solid var(--line);
+}
+
+.image-missing {
+    padding: 1.1rem;
+    border: 1px dashed #c9533f;
+    border-radius: 8px;
+    color: #b1422f;
+    background: #fbeeec;
+    font-size: 0.9rem;
+    text-align: center;
+}
+
+@media print {
+    pre,
+    blockquote {
+        page-break-inside: avoid;
+        break-inside: avoid-page;
+    }
+
+    a {
+        color: #111;
+        text-decoration: none;
+    }
+}

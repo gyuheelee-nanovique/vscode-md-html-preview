@@ -1,0 +1,478 @@
+/**
+ * Preview lifecycle: a single reusable Webview panel that mirrors the active
+ * Markdown document, plus the standalone HTML export.
+ *
+ * Responsibilities (per the plan's `previewPanel.ts` module):
+ *  - create / reveal the panel beside the editor
+ *  - subscribe to document changes and re-render on a debounce
+ *  - rewrite image paths to Webview resource URIs (or base64 when configured)
+ *  - clean up timers and the panel on disposal
+ */
+
+import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+import * as crypto from "crypto";
+
+import { markdownToArticleHtml, RenderOptions, RenderResult } from "./markdownRenderer";
+import { buildHtmlDocument } from "./htmlTemplate";
+
+const MIME_BY_EXT: Record<string, string> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".svg": "image/svg+xml",
+  ".webp": "image/webp",
+  ".bmp": "image/bmp",
+  ".avif": "image/avif",
+};
+
+interface PreviewConfig {
+  embedImages: boolean;
+  openReferences: boolean;
+  removeTopImages: number;
+  plainCitations: boolean;
+  debounceMs: number;
+  scrollSync: boolean;
+}
+
+function guessMime(file: string): string {
+  return MIME_BY_EXT[path.extname(file).toLowerCase()] ?? "application/octet-stream";
+}
+
+function getNonce(): string {
+  return crypto.randomBytes(24).toString("base64").replace(/[^A-Za-z0-9]/g, "").slice(0, 32);
+}
+
+function isRemoteOrData(rel: string): boolean {
+  return /^(https?:|data:)/i.test(rel);
+}
+
+/** Resolve a local relative path against `baseDir`, tolerating URL-encoded names. */
+function resolveLocalPath(baseDir: string, rel: string): string | null {
+  const candidates = [rel];
+  try {
+    const decoded = decodeURIComponent(rel);
+    if (decoded !== rel) {
+      candidates.push(decoded);
+    }
+  } catch {
+    /* malformed URI escape — keep the raw form */
+  }
+  for (const candidate of candidates) {
+    const abs = path.resolve(baseDir, candidate);
+    try {
+      if (fs.statSync(abs).isFile()) {
+        return abs;
+      }
+    } catch {
+      /* not found — try next candidate */
+    }
+  }
+  return null;
+}
+
+export class PreviewManager {
+  private panel: vscode.WebviewPanel | undefined;
+  private sourceUri: vscode.Uri | undefined;
+  private currentRootPaths: string[] = [];
+  private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+  /** While set (epoch ms), ignore editor scroll events — they were caused by us revealing. */
+  private ignoreEditorScrollUntil = 0;
+  private readonly cssText: string;
+
+  constructor(private readonly context: vscode.ExtensionContext) {
+    this.cssText = this.loadCss();
+
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeTextDocument((e) => {
+        if (this.sourceUri && e.document.uri.toString() === this.sourceUri.toString()) {
+          this.scheduleRender();
+        }
+      }),
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (e.affectsConfiguration("mdHtmlPreview")) {
+          void this.render();
+        }
+      }),
+      vscode.window.onDidChangeActiveTextEditor((editor) => {
+        // Follow the active Markdown editor, like the built-in preview.
+        if (this.panel && editor && editor.document.languageId === "markdown") {
+          this.open(editor);
+        }
+      }),
+      vscode.window.onDidChangeTextEditorVisibleRanges((e) => this.onEditorScroll(e))
+    );
+  }
+
+  /** Editor → preview: push the top visible source line to the Webview. */
+  private onEditorScroll(e: vscode.TextEditorVisibleRangesChangeEvent): void {
+    if (!this.panel || !this.sourceUri) {
+      return;
+    }
+    if (e.textEditor.document.uri.toString() !== this.sourceUri.toString()) {
+      return;
+    }
+    if (Date.now() < this.ignoreEditorScrollUntil) {
+      return; // this scroll was caused by our own preview → editor reveal
+    }
+    if (!this.readConfig(this.sourceUri).scrollSync) {
+      return;
+    }
+    const ranges = e.visibleRanges;
+    if (ranges.length === 0) {
+      return;
+    }
+    void this.panel.webview.postMessage({ type: "scrollToLine", line: ranges[0].start.line });
+  }
+
+  /** Preview → editor: reveal the reported source line in the source editor. */
+  private onPreviewMessage(message: { type?: string; line?: number }): void {
+    if (!this.sourceUri || message.type !== "revealLine" || typeof message.line !== "number") {
+      return;
+    }
+    if (!this.readConfig(this.sourceUri).scrollSync) {
+      return;
+    }
+    const editor = vscode.window.visibleTextEditors.find(
+      (ed) => ed.document.uri.toString() === this.sourceUri?.toString()
+    );
+    if (!editor) {
+      return;
+    }
+    const line = Math.max(0, Math.min(editor.document.lineCount - 1, Math.round(message.line)));
+    this.ignoreEditorScrollUntil = Date.now() + 250;
+    editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop);
+  }
+
+  /** Active Markdown editor's document, or the document the preview is bound to. */
+  private commandTargetUri(): vscode.Uri | undefined {
+    const editor = vscode.window.activeTextEditor;
+    if (
+      editor &&
+      (editor.document.languageId === "markdown" ||
+        /\.(md|markdown)$/i.test(editor.document.uri.fsPath))
+    ) {
+      return editor.document.uri;
+    }
+    return this.sourceUri;
+  }
+
+  /** Render the document as a self-contained HTML document (base64 images, no sync attrs). */
+  private buildStandaloneHtml(
+    uri: vscode.Uri,
+    doc: vscode.TextDocument
+  ): { html: string; result: RenderResult } {
+    const cfg = this.readConfig(uri);
+    const baseDir = uri.scheme === "file" ? path.dirname(uri.fsPath) : undefined;
+    const result = markdownToArticleHtml(doc.getText(), {
+      keepLinks: !cfg.plainCitations,
+      removeTopImages: cfg.removeTopImages,
+      openReferences: true, // keep references open for print
+      resolveImage: this.makeResolveImage(baseDir, undefined, true),
+      sourceLines: false,
+    });
+    const html = buildHtmlDocument({
+      title: path.basename(uri.fsPath || uri.path),
+      articleHtml: result.articleHtml,
+      css: this.cssText,
+      nonce: getNonce(),
+    });
+    return { html, result };
+  }
+
+  /**
+   * "Print / Save as PDF": render the standalone HTML and open it in the external
+   * browser, where the native print dialog works with the A4 print CSS. VS Code
+   * webviews run in a sandboxed iframe without `allow-modals`, so an in-webview
+   * `window.print()` is silently blocked — hence the browser hand-off.
+   */
+  async print(): Promise<void> {
+    const uri = this.commandTargetUri();
+    if (!uri) {
+      vscode.window.showWarningMessage("먼저 Markdown 문서를 열거나 미리보기를 여세요.");
+      return;
+    }
+    let doc: vscode.TextDocument;
+    try {
+      doc = await vscode.workspace.openTextDocument(uri);
+    } catch {
+      vscode.window.showWarningMessage("문서를 열 수 없습니다.");
+      return;
+    }
+
+    const { html } = this.buildStandaloneHtml(uri, doc);
+    const base = path.basename(uri.fsPath || uri.path).replace(/\.(md|markdown)$/i, "") || "preview";
+    const tmpPath = path.join(os.tmpdir(), `mdpreview-${base}.html`);
+    try {
+      fs.writeFileSync(tmpPath, html, "utf8");
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `인쇄용 HTML 생성 실패: ${err instanceof Error ? err.message : String(err)}`
+      );
+      return;
+    }
+
+    await vscode.env.openExternal(vscode.Uri.file(tmpPath));
+    vscode.window.setStatusBarMessage(
+      "브라우저에서 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P).",
+      6000
+    );
+  }
+
+  private loadCss(): string {
+    const cssPath = path.join(this.context.extensionPath, "media", "preview.css");
+    try {
+      return fs.readFileSync(cssPath, "utf8");
+    } catch {
+      return "/* preview.css missing */";
+    }
+  }
+
+  private readConfig(scope?: vscode.Uri): PreviewConfig {
+    const cfg = vscode.workspace.getConfiguration("mdHtmlPreview", scope ?? null);
+    return {
+      embedImages: cfg.get<boolean>("embedImages", false),
+      openReferences: cfg.get<boolean>("openReferences", true),
+      removeTopImages: Math.max(0, cfg.get<number>("removeTopImages", 0)),
+      plainCitations: cfg.get<boolean>("plainCitations", true),
+      debounceMs: Math.max(0, cfg.get<number>("debounceMs", 200)),
+      scrollSync: cfg.get<boolean>("scrollSync", true),
+    };
+  }
+
+  private titleFor(uri: vscode.Uri): string {
+    return `HTML Preview — ${path.basename(uri.fsPath || uri.path)}`;
+  }
+
+  /**
+   * Resource roots the Webview may load files from: the extension, the document's own
+   * directory, every workspace folder, and the directories that actually contain the
+   * document's (possibly parent-relative) images — otherwise asWebviewUri produces URIs
+   * the Webview resource loader silently refuses to serve.
+   */
+  private rootsFor(uri: vscode.Uri, mdText: string): vscode.Uri[] {
+    const seen = new Set<string>();
+    const roots: vscode.Uri[] = [];
+    const add = (u: vscode.Uri) => {
+      if (!seen.has(u.fsPath)) {
+        seen.add(u.fsPath);
+        roots.push(u);
+      }
+    };
+    add(this.context.extensionUri);
+    let baseDir: string | undefined;
+    if (uri.scheme === "file") {
+      baseDir = path.dirname(uri.fsPath);
+      add(vscode.Uri.file(baseDir));
+    }
+    for (const folder of vscode.workspace.workspaceFolders ?? []) {
+      add(folder.uri);
+    }
+    if (baseDir) {
+      for (const rel of mdText.matchAll(/!\[[^\]]*\]\(([^)]+)\)/g)) {
+        const target = rel[1].trim();
+        if (isRemoteOrData(target)) {
+          continue;
+        }
+        const abs = resolveLocalPath(baseDir, target);
+        if (abs) {
+          add(vscode.Uri.file(path.dirname(abs)));
+        }
+      }
+    }
+    return roots;
+  }
+
+  /** Whether the live panel's roots already cover every directory `roots` needs. */
+  private rootsCover(roots: vscode.Uri[]): boolean {
+    return roots.every((r) =>
+      this.currentRootPaths.some((have) => r.fsPath === have || r.fsPath.startsWith(have + path.sep))
+    );
+  }
+
+  /** Open (or re-target) the preview for the given editor's document. */
+  open(editor: vscode.TextEditor): void {
+    const uri = editor.document.uri;
+    this.sourceUri = uri;
+    const roots = this.rootsFor(uri, editor.document.getText());
+
+    // Reuse the panel when its roots already cover the new document; otherwise recreate
+    // it (localResourceRoots can only be set at construction time).
+    if (this.panel && !this.rootsCover(roots)) {
+      this.panel.dispose();
+    }
+
+    if (!this.panel) {
+      const panel = vscode.window.createWebviewPanel(
+        "mdHtmlPreview",
+        this.titleFor(uri),
+        { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          localResourceRoots: roots,
+        }
+      );
+      this.panel = panel;
+      this.currentRootPaths = roots.map((r) => r.fsPath);
+      // Track this panel's subscriptions in a per-panel store (disposed when it fires),
+      // not context.subscriptions, so re-creating the panel does not leak dead listeners.
+      const panelDisposables: vscode.Disposable[] = [];
+      panel.webview.onDidReceiveMessage((m) => this.onPreviewMessage(m), null, panelDisposables);
+      panel.onDidDispose(
+        () => {
+          if (this.panel === panel) {
+            this.panel = undefined;
+            this.currentRootPaths = [];
+            this.clearDebounce();
+          }
+          panelDisposables.forEach((d) => d.dispose());
+          panelDisposables.length = 0;
+        },
+        null,
+        panelDisposables
+      );
+    } else {
+      this.panel.reveal(vscode.ViewColumn.Beside, true);
+    }
+
+    void this.render();
+  }
+
+  private scheduleRender(): void {
+    if (!this.sourceUri) {
+      return;
+    }
+    const { debounceMs } = this.readConfig(this.sourceUri);
+    this.clearDebounce();
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = undefined;
+      void this.render();
+    }, debounceMs);
+  }
+
+  private clearDebounce(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = undefined;
+    }
+  }
+
+  private makeResolveImage(
+    baseDir: string | undefined,
+    webview: vscode.Webview | undefined,
+    embed: boolean
+  ): (rel: string) => string | null {
+    return (rel: string): string | null => {
+      if (isRemoteOrData(rel)) {
+        return rel;
+      }
+      if (!baseDir) {
+        return null;
+      }
+      const abs = resolveLocalPath(baseDir, rel);
+      if (!abs) {
+        return null;
+      }
+      if (embed) {
+        try {
+          const data = fs.readFileSync(abs).toString("base64");
+          return `data:${guessMime(abs)};base64,${data}`;
+        } catch {
+          return null;
+        }
+      }
+      if (webview) {
+        return webview.asWebviewUri(vscode.Uri.file(abs)).toString();
+      }
+      return null;
+    };
+  }
+
+  private async render(): Promise<void> {
+    if (!this.panel || !this.sourceUri) {
+      return;
+    }
+    let doc: vscode.TextDocument;
+    try {
+      doc = await vscode.workspace.openTextDocument(this.sourceUri);
+    } catch {
+      return;
+    }
+    // A late async resolution may arrive after the panel was closed / re-targeted.
+    if (!this.panel || !this.sourceUri || doc.uri.toString() !== this.sourceUri.toString()) {
+      return;
+    }
+
+    const cfg = this.readConfig(this.sourceUri);
+    const baseDir = this.sourceUri.scheme === "file" ? path.dirname(this.sourceUri.fsPath) : undefined;
+    const webview = this.panel.webview;
+
+    const options: RenderOptions = {
+      keepLinks: !cfg.plainCitations,
+      removeTopImages: cfg.removeTopImages,
+      openReferences: cfg.openReferences,
+      resolveImage: this.makeResolveImage(baseDir, webview, cfg.embedImages),
+    };
+
+    const result = markdownToArticleHtml(doc.getText(), options);
+    const html = buildHtmlDocument({
+      title: this.titleFor(this.sourceUri),
+      articleHtml: result.articleHtml,
+      css: this.cssText,
+      cspSource: webview.cspSource,
+      nonce: getNonce(),
+      scrollSync: cfg.scrollSync,
+    });
+
+    webview.html = html;
+    this.panel.title = this.titleFor(this.sourceUri);
+  }
+
+  /** Build a standalone HTML file (images embedded as base64) next to the source. */
+  async exportHtml(editor: vscode.TextEditor): Promise<void> {
+    const doc = editor.document;
+    const uri = doc.uri;
+    if (uri.scheme !== "file") {
+      vscode.window.showWarningMessage("저장된 파일에서만 HTML로 내보낼 수 있습니다.");
+      return;
+    }
+
+    const { html, result } = this.buildStandaloneHtml(uri, doc);
+    const base = path.basename(uri.fsPath).replace(/\.(md|markdown)$/i, "");
+    const outPath = path.join(path.dirname(uri.fsPath), `${base}.html`);
+
+    if (fs.existsSync(outPath)) {
+      const choice = await vscode.window.showWarningMessage(
+        `${path.basename(outPath)} 파일이 이미 있습니다. 덮어쓸까요?`,
+        { modal: true },
+        "덮어쓰기"
+      );
+      if (choice !== "덮어쓰기") {
+        return;
+      }
+    }
+
+    try {
+      fs.writeFileSync(outPath, html, "utf8");
+    } catch (err) {
+      vscode.window.showErrorMessage(`HTML 내보내기 실패: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+
+    const notes: string[] = [`${result.renderedImages}개 이미지 포함`];
+    if (result.missingImages.length > 0) {
+      notes.push(`누락 ${result.missingImages.length}개`);
+    }
+    const open = await vscode.window.showInformationMessage(
+      `HTML 내보내기 완료: ${path.basename(outPath)} (${notes.join(", ")})`,
+      "열기"
+    );
+    if (open === "열기") {
+      void vscode.commands.executeCommand("vscode.open", vscode.Uri.file(outPath));
+    }
+  }
+}

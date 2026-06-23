@@ -1,0 +1,141 @@
+{
+  "name": "vscode-md-html-preview",
+  "displayName": "Markdown HTML Preview (Paper)",
+  "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, image embedding, foldable references, docling tables, and A4 print CSS. Mirrors the standalone HTML produced by tools/pdf_to_html.py.",
+  "version": "0.1.1",
+  "publisher": "nanovique",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gyuheelee-nanovique/vscode-md-html-preview.git"
+  },
+  "engines": {
+    "vscode": "^1.74.0"
+  },
+  "categories": [
+    "Other",
+    "Visualization"
+  ],
+  "keywords": [
+    "markdown",
+    "preview",
+    "html",
+    "katex",
+    "docling",
+    "paper"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [
+    "onCommand:mdHtmlPreview.open",
+    "onCommand:mdHtmlPreview.exportHtml",
+    "onCommand:mdHtmlPreview.print",
+    "onWebviewPanel:mdHtmlPreview"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "mdHtmlPreview.open",
+        "title": "Open",
+        "category": "Markdown HTML Preview",
+        "icon": "$(open-preview)"
+      },
+      {
+        "command": "mdHtmlPreview.exportHtml",
+        "title": "Export Standalone HTML",
+        "category": "Markdown HTML Preview",
+        "icon": "$(save-as)"
+      },
+      {
+        "command": "mdHtmlPreview.print",
+        "title": "Print / Save as PDF",
+        "category": "Markdown HTML Preview",
+        "icon": "$(printer)"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "mdHtmlPreview.open",
+          "when": "editorLangId == markdown",
+          "group": "navigation"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "mdHtmlPreview.open",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "mdHtmlPreview.exportHtml",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "mdHtmlPreview.print",
+          "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "mdHtmlPreview.open",
+        "key": "ctrl+shift+alt+v",
+        "mac": "cmd+shift+alt+v",
+        "when": "editorLangId == markdown"
+      },
+      {
+        "command": "mdHtmlPreview.print",
+        "key": "ctrl+'",
+        "mac": "cmd+'",
+        "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+      }
+    ],
+    "configuration": {
+      "title": "Markdown HTML Preview (Paper)",
+      "properties": {
+        "mdHtmlPreview.embedImages": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Embed local images as base64 data URIs in the live preview. When `false` (recommended for live editing) images are loaded via Webview resource URIs, which keeps refreshes fast. Standalone export always embeds images regardless of this setting."
+        },
+        "mdHtmlPreview.openReferences": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Open the `참고문헌` (References) `<details>` section by default. Turn off to collapse references for on-screen reading; export keeps them open so they are not omitted in print."
+        },
+        "mdHtmlPreview.removeTopImages": {
+          "type": "integer",
+          "default": 0,
+          "minimum": 0,
+          "markdownDescription": "Remove the first N images (typically publisher logos / decorative header images extracted by docling). Scientific figures after the first N are kept."
+        },
+        "mdHtmlPreview.plainCitations": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Render citation markers like `[13]`, `[81, 82]` and other `[text](url)` links as plain text (no `<a>` tags), matching the paper HTML pipeline. Turn off to keep Markdown links as clickable anchors."
+        },
+        "mdHtmlPreview.debounceMs": {
+          "type": "integer",
+          "default": 200,
+          "minimum": 0,
+          "maximum": 2000,
+          "markdownDescription": "Debounce delay (ms) between an edit and the preview refresh."
+        },
+        "mdHtmlPreview.scrollSync": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Synchronize scroll position between the Markdown editor and the HTML preview in both directions."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.74.0",
+    "typescript": "^5.4.0"
+  }
+}
