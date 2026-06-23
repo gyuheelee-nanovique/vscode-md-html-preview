@@ -183,7 +183,7 @@ tr:last-child td { border-bottom: 0; }
 
 @page {
     size: A4;
-    margin: 18mm 16mm 20mm;
+    margin: 20mm;          /* top/right/bottom/left all 20mm */
 }
 
 @media print {
@@ -248,17 +248,21 @@ tr:last-child td { border-bottom: 0; }
 
     .figure img {
         max-width: 100%;
-        max-height: 180mm;
+        /* A4 printable height = 297 - 2*20mm margin = 257mm; cap below that (minus the
+           6mm figure margins) so a tall figure scales to fit one page instead of being
+           clipped, while .figure's break-inside:avoid keeps it whole. */
+        max-height: 240mm;
         object-fit: contain;
     }
 
+    /* Tables: let large tables flow across pages (header repeats via thead, rows never
+       split — see below) instead of forcing the whole table onto one page, which would
+       clip anything taller than a single page (e.g. the 36-row simulation table). */
     .table-scroll {
         margin: 6mm 0;
         overflow: visible;
         border-top: 0.4pt solid #999;
         border-bottom: 0.4pt solid #999;
-        page-break-inside: avoid;
-        break-inside: avoid-page;
     }
 
     table {
