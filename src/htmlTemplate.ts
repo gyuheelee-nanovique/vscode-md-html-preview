@@ -25,6 +25,11 @@ export const KATEX_JS_SRC = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/kat
 const HLJS_VERSION = "11.11.1";
 export const HLJS_JS_SRC = `https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@${HLJS_VERSION}/build/highlight.min.js`;
 export const HLJS_CSS_HREF = `https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@${HLJS_VERSION}/build/styles/github.min.css`;
+// Mermaid (UMD browser bundle) for `<pre class="mermaid">` diagrams. Loaded only when the
+// article actually contains a mermaid block. jsdelivr is already the allowed CDN_ORIGIN, so
+// no CSP change is needed for the script; mermaid injects its own <style> at runtime, which
+// style-src 'unsafe-inline' already permits.
+export const MERMAID_JS_SRC = "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js";
 const CDN_ORIGIN = "https://cdn.jsdelivr.net";
 
 export interface TemplateOptions {
@@ -55,6 +60,22 @@ if (window.hljs) {
   document.querySelectorAll('pre code[class*="language-"]').forEach(function (el) {
     try { window.hljs.highlightElement(el); } catch (err) { /* unknown language: leave plain */ }
   });
+}
+if (window.mermaid && document.querySelector('pre.mermaid')) {
+  try {
+    window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
+    // mermaid.run() reads each pre.mermaid's textContent and replaces it with an <svg>.
+    // It is async; swallow rejection so one bad diagram leaves its raw source in place
+    // without breaking KaTeX/scroll-sync that ran synchronously above.
+    var remap = function () {
+      try {
+        if (window.acquireVsCodeApi || window.parent !== window) {
+          window.postMessage({ type: 'remap' }, '*');
+        }
+      } catch (e) { /* export mode: no message channel, nothing to remap */ }
+    };
+    Promise.resolve(window.mermaid.run()).then(remap, remap);
+  } catch (err) { /* mermaid init failed: leave raw source */ }
 }`.trim();
 
 function previewScript(nonce: string, scrollSync: boolean): string {
@@ -208,6 +229,12 @@ export function buildHtmlDocument(options: TemplateOptions): string {
   const hljsCss = hasCode ? `<link rel="stylesheet" href="${HLJS_CSS_HREF}">\n` : "";
   const hljsScript = hasCode ? `\n<script defer${nonceAttr} src="${HLJS_JS_SRC}"></script>` : "";
 
+  // Load Mermaid only when a `<pre class="mermaid">` diagram is present. `defer` makes it
+  // execute before DOMContentLoaded, so window.mermaid is ready when RENDER_BODY runs in
+  // both the preview and export render scripts. No CSP change is required (see CDN_ORIGIN).
+  const hasMermaid = articleHtml.includes('class="mermaid"');
+  const mermaidScript = hasMermaid ? `\n<script defer${nonceAttr} src="${MERMAID_JS_SRC}"></script>` : "";
+
   return `<!doctype html>
 <html lang="ko">
 <head>
@@ -218,7 +245,7 @@ ${cspMeta}<title>${escapeHtml(title)}</title>
 ${hljsCss}<style>
 ${css}
 </style>
-${katexScript}${hljsScript}
+${katexScript}${hljsScript}${mermaidScript}
 ${renderScript}
 </head>
 <body>

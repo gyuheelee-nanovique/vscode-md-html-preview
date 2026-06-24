@@ -12,6 +12,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.normalizeMath = normalizeMath;
 exports.normalizeDisplayMath = normalizeDisplayMath;
 exports.renderMathBlock = renderMathBlock;
+exports.renderDisplayMath = renderDisplayMath;
 exports.textualMathFixes = textualMathFixes;
 const htmlEscape_1 = require("../htmlEscape");
 /** Known LaTeX sub-expression fixes (docling tends to emit these forms). */
@@ -69,6 +70,15 @@ function renderMathBlock(expr) {
     return ('<div class="math-block">' +
         `<span class="math-tex" data-display="true">${(0, htmlEscape_1.escapeHtml)(normalized)}</span>` +
         "</div>");
+}
+/**
+ * Render a `$$…$$` display equation (the inner LaTeX, *without* the delimiters) to a
+ * display-math span. Identical wrapping to `renderMathBlock` so KaTeX renders it in
+ * `displayMode`; the inner LaTeX is HTML-escaped for safe transport and the browser
+ * restores it via `textContent` before KaTeX reads it.
+ */
+function renderDisplayMath(expr) {
+    return renderMathBlock(expr);
 }
 function textualMathFixes(text) {
     let out = text;

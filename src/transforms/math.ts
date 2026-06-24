@@ -82,6 +82,16 @@ export function renderMathBlock(expr: string): string {
   );
 }
 
+/**
+ * Render a `$$…$$` display equation (the inner LaTeX, *without* the delimiters) to a
+ * display-math span. Identical wrapping to `renderMathBlock` so KaTeX renders it in
+ * `displayMode`; the inner LaTeX is HTML-escaped for safe transport and the browser
+ * restores it via `textContent` before KaTeX reads it.
+ */
+export function renderDisplayMath(expr: string): string {
+  return renderMathBlock(expr);
+}
+
 export function textualMathFixes(text: string): string {
   let out = text;
   for (const [oldStr, newStr] of TEXTUAL_MATH_FIXES) {

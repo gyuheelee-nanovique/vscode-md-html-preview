@@ -1,8 +1,8 @@
 {
   "name": "vscode-md-html-preview",
   "displayName": "Markdown HTML Preview (Paper)",
-  "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, image embedding, foldable references, docling tables, and A4 print CSS. Mirrors the standalone HTML produced by tools/pdf_to_html.py.",
-  "version": "0.1.3",
+  "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, Mermaid diagrams, image embedding, foldable references, docling tables, and A4 print CSS. Mirrors the standalone HTML produced by tools/pdf_to_html.py.",
+  "version": "0.2.0",
   "publisher": "nanovique",
   "license": "MIT",
   "repository": {
@@ -22,7 +22,8 @@
     "html",
     "katex",
     "docling",
-    "paper"
+    "paper",
+    "mermaid"
   ],
   "main": "./out/extension.js",
   "activationEvents": [
