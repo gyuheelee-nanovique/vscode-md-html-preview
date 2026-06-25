@@ -57,7 +57,7 @@ function tr(cells) {
 }
 function renderSimulationTable(rows, caption, inline) {
     const data = rows.slice(3).filter((row) => row.length >= 12);
-    const parts = ['<div class="table-scroll"><table>'];
+    const parts = ['<div class="table-scroll"><table class="sim-table">'];
     if (caption) {
         parts.push(`<caption>${inline(caption)}</caption>`);
     }
