@@ -49,6 +49,7 @@ const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
 const os = __importStar(require("os"));
 const crypto = __importStar(require("crypto"));
+const child_process_1 = require("child_process");
 const markdownRenderer_1 = require("./markdownRenderer");
 const htmlTemplate_1 = require("./htmlTemplate");
 const MIME_BY_EXT = {
@@ -203,8 +204,11 @@ class PreviewManager {
             return;
         }
         const { html } = this.buildStandaloneHtml(uri, doc);
-        const base = path.basename(uri.fsPath || uri.path).replace(/\.(md|markdown)$/i, "") || "preview";
-        const tmpPath = path.join(os.tmpdir(), `mdpreview-${base}.html`);
+        const rawBase = path.basename(uri.fsPath || uri.path).replace(/\.(md|markdown)$/i, "");
+        // Keep the temp filename ASCII-only: a non-ASCII name (e.g. Korean) gets percent-
+        // encoded by Uri.file and ShellExecute then fails to find the literal file (error 0x2).
+        const base = rawBase.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "preview";
+        const tmpPath = path.join(os.tmpdir(), `mdpreview-${base}-${crypto.randomBytes(3).toString("hex")}.html`);
         try {
             fs.writeFileSync(tmpPath, html, "utf8");
         }
@@ -212,8 +216,35 @@ class PreviewManager {
             vscode.window.showErrorMessage(`인쇄용 HTML 생성 실패: ${err instanceof Error ? err.message : String(err)}`);
             return;
         }
-        await vscode.env.openExternal(vscode.Uri.file(tmpPath));
+        this.openInBrowser(tmpPath);
         vscode.window.setStatusBarMessage("브라우저에서 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P).", 6000);
+    }
+    /**
+     * Open a local file in the OS default app (the browser, for .html) using the RAW
+     * filesystem path. `vscode.env.openExternal(Uri.file(...))` percent-encodes the path,
+     * which makes ShellExecute fail to find non-ASCII (e.g. Korean) paths on Windows
+     * (error 0x2); spawning the platform opener with the verbatim path avoids that. Falls
+     * back to openExternal if the opener binary itself cannot be spawned.
+     */
+    openInBrowser(filePath) {
+        const platform = process.platform;
+        const opener = platform === "win32"
+            ? { cmd: "explorer.exe", args: [filePath] }
+            : platform === "darwin"
+                ? { cmd: "open", args: [filePath] }
+                : { cmd: "xdg-open", args: [filePath] };
+        try {
+            // explorer.exe exits with code 1 even on success, so only a spawn ERROR (binary not
+            // found) triggers the fallback.
+            const child = (0, child_process_1.spawn)(opener.cmd, opener.args, { detached: true, stdio: "ignore" });
+            child.on("error", () => {
+                void vscode.env.openExternal(vscode.Uri.file(filePath));
+            });
+            child.unref();
+        }
+        catch {
+            void vscode.env.openExternal(vscode.Uri.file(filePath));
+        }
     }
     loadCss() {
         const cssPath = path.join(this.context.extensionPath, "media", "preview.css");
