@@ -1,10 +1,14 @@
 /*
  * Canonical stylesheet, shared by the live preview and the standalone export.
  *
- * The base reading + A4 print rules are kept byte-for-byte in sync with the CSS in
- * tools/pdf_to_html.py so the preview is a faithful proxy for the exported document.
- * The block at the end ("Preview / general-Markdown additions") styles constructs the
- * paper pipeline never emits (code, blockquotes, lists, rules, links).
+ * The base reading + A4 print rules match the intent of the CSS in tools/pdf_to_html.py,
+ * but this file additionally drives the extension-only interactive features (dark theme,
+ * slide mode, auto-hiding scrollbars, the right-click settings menu) and a uniform-bold
+ * heading scale, so it is no longer byte-for-byte identical to the paper pipeline.
+ *
+ * Theming is variable-driven: `:root` holds the light palette, `:root[data-theme="dark"]`
+ * overrides it, and `@media print` resets every variable back to light (print is always
+ * light, on paper, regardless of the on-screen theme).
  */
 
 @font-face {
@@ -29,6 +33,25 @@
     --line: #dedbd2;
     --soft: #f1efe8;
     --accent: #cf4520;        /* 다홍 (vermilion) — inline code & block-quote text */
+    --heading: #181815;
+    --link: #3a5f8a;
+    --hair: #e8e5dd;          /* table row hairlines */
+    --th-ink: #312f2a;
+}
+
+/* Dark theme — a warm dark that keeps the paper character (not a flat neutral grey). */
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #1b1a17;
+    --ink: #e7e3d9;
+    --muted: #a29e94;
+    --line: #383530;
+    --soft: #262420;
+    --accent: #ff6f47;        /* brighter vermilion so it reads on the dark fill */
+    --heading: #f4f1e9;
+    --link: #92b4e6;
+    --hair: #322f2a;
+    --th-ink: #ece8df;
 }
 
 * { box-sizing: border-box; }
@@ -59,12 +82,14 @@ main {
 
 article { width: 100%; }
 
+/* Uniform heading scale: every heading is bold (700); hierarchy is expressed by SIZE only,
+   so a bigger section title never looks lighter than a smaller sub-heading. */
 h1, h2, h3, h4, h5, h6 {
     margin: 2.4rem 0 0.9rem;
     line-height: 1.38;
-    font-weight: 400;
+    font-weight: 700;
     letter-spacing: 0;
-    color: #181815;
+    color: var(--heading);
     overflow-wrap: anywhere;
 }
 
@@ -78,32 +103,28 @@ h1 {
 
 h2 {
     padding-top: 0.4rem;
-    font-size: 1.6rem;
+    font-size: 1.55rem;
 }
 
 h3 {
     margin-top: 2.0rem;
     font-size: 1.3rem;
-    font-weight: 700;
 }
 h4 {
     margin-top: 1.7rem;
     margin-bottom: 0.6rem;
-    font-size: 1.12rem;
-    font-weight: 700;
+    font-size: 1.15rem;
 }
 h5 {
     margin-top: 1.5rem;
     margin-bottom: 0.5rem;
     font-size: 1.05rem;
-    font-weight: 700;
     letter-spacing: 0.01em;
 }
 h6 {
     margin-top: 1.4rem;
     margin-bottom: 0.45rem;
     font-size: 1rem;
-    font-weight: 700;
     letter-spacing: 0.06em;
     text-transform: uppercase;
     color: var(--muted);
@@ -156,7 +177,7 @@ table caption {
 
 th, td {
     padding: 0.55rem 0.65rem;
-    border-bottom: 1px solid #e8e5dd;
+    border-bottom: 1px solid var(--hair);
     text-align: left;
     vertical-align: top;
     overflow-wrap: anywhere;
@@ -164,8 +185,8 @@ th, td {
 
 th {
     background: var(--soft);
-    font-weight: 400;
-    color: #312f2a;
+    font-weight: 700;
+    color: var(--th-ink);
 }
 
 tr:last-child td { border-bottom: 0; }
@@ -191,7 +212,7 @@ tr:last-child td { border-bottom: 0; }
     padding: 0.95rem 0;
     font-size: 1.45rem;
     line-height: 1.38;
-    color: #181815;
+    color: var(--heading);
 }
 
 .references summary::marker { color: var(--muted); }
@@ -212,12 +233,134 @@ tr:last-child td { border-bottom: 0; }
     html { font-size: 16px; }
     main { padding: 34px 18px 64px; }
     h1 { font-size: 1.55rem; }
-    h2 { font-size: 1.22rem; }
+    h2 { font-size: 1.3rem; }
     h3 { font-size: 1.18rem; }
-    h4 { font-size: 1.05rem; }
+    h4 { font-size: 1.08rem; }
     h5 { font-size: 1.02rem; }
     h6 { font-size: 1rem; }
 }
+
+/* ------------------------------------------------------------------ *
+ * Slide mode
+ * Activated by data-mode="slide" on <html>. The client clones the article's blocks,
+ * splits them at each `.slide-sep` (the `---` rule), and shows one `.slide` at a time.
+ * The original <main> stays intact but hidden, so printing (below) uses it verbatim.
+ * ------------------------------------------------------------------ */
+
+:root[data-mode="slide"] main { display: none; }
+:root[data-mode="slide"] body { overflow: hidden; }
+
+.deck {
+    position: fixed;
+    inset: 0;
+    z-index: 10;
+    background: var(--bg);
+}
+
+.slide {
+    position: absolute;
+    inset: 0;
+    display: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    /* Content expands left/right with the window; the horizontal gutter scales with the
+       viewport (clamp) so lines stay comfortable from a narrow pane to a wide monitor. */
+    padding: 6vh clamp(28px, 7vw, 160px) 12vh;
+}
+
+.slide.active { display: block; }
+
+/* The first heading of a slide shouldn't carry the big top margin / h1 underline gap. */
+.slide > :first-child { margin-top: 0; }
+
+/* ------------------------------------------------------------------ *
+ * Auto-hiding scrollbars — the thumb is transparent at rest and only tinted while the
+ * element is actively scrolling (JS toggles `.scrolling`). Track width is constant so
+ * showing the thumb never reflows the content.
+ * ------------------------------------------------------------------ */
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+    background: transparent;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+    border-radius: 8px;
+}
+.scrolling::-webkit-scrollbar-thumb,
+body.scrolling::-webkit-scrollbar-thumb {
+    background: var(--muted);
+    background-clip: padding-box;
+}
+.scrolling::-webkit-scrollbar-thumb:hover,
+body.scrolling::-webkit-scrollbar-thumb:hover { background: var(--ink); }
+
+/* ------------------------------------------------------------------ *
+ * Settings menu (right-click) — theme + view mode. Minimal, no chrome buttons.
+ * ------------------------------------------------------------------ */
+
+.ui-menu {
+    position: fixed;
+    z-index: 50;
+    min-width: 148px;
+    padding: 6px;
+    background: var(--bg);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.22);
+    font-family: 'Presentation', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    font-size: 0.9rem;
+    line-height: 1.3;
+    user-select: none;
+}
+
+.ui-menu-label {
+    padding: 5px 10px 3px;
+    font-size: 0.7rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+}
+
+.ui-menu-sep { height: 1px; margin: 6px 6px; background: var(--line); }
+
+.ui-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.ui-menu-item:hover { background: var(--soft); }
+
+.ui-menu-item::before {
+    content: '';
+    flex: 0 0 auto;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 1.5px solid var(--muted);
+    background: transparent;
+}
+
+.ui-menu-item[aria-checked="true"]::before {
+    border-color: var(--accent);
+    background: radial-gradient(circle, var(--accent) 0 3.5px, transparent 4.5px);
+}
+
+/* ------------------------------------------------------------------ *
+ * Print — A4, and ALWAYS light + the continuous document (never the slide deck),
+ * regardless of the on-screen theme/mode.
+ * ------------------------------------------------------------------ */
 
 @page {
     size: A4;
@@ -225,6 +368,28 @@ tr:last-child td { border-bottom: 0; }
 }
 
 @media print {
+    /* Reset the palette to light: paper is white with dark ink no matter the screen theme. */
+    :root,
+    :root[data-theme="dark"] {
+        color-scheme: light;
+        --bg: #fff;
+        --ink: #111;
+        --muted: #555;
+        --line: #999;
+        --soft: #f3f3f3;
+        --accent: #cf4520;
+        --heading: #111;
+        --link: #111;
+        --hair: #ddd;
+        --th-ink: #111;
+    }
+
+    /* Interactive-only chrome never prints; the continuous document always does. */
+    .deck,
+    .ui-menu { display: none !important; }
+    :root[data-mode="slide"] main { display: block !important; }
+    :root[data-mode="slide"] body { overflow: visible !important; }
+
     html,
     body {
         /* Let @page (size + margin) define the sheet and printable column. Forcing the
@@ -277,24 +442,20 @@ tr:last-child td { border-bottom: 0; }
     h3 {
         margin: 7mm 0 2.5mm;
         font-size: 12pt;
-        font-weight: 700;
         line-height: 1.32;
     }
     h4 {
         margin: 6mm 0 2mm;
         font-size: 11.5pt;
-        font-weight: 700;
     }
     h5 {
         margin: 5mm 0 1.8mm;
         font-size: 11pt;
-        font-weight: 700;
         letter-spacing: 0.01em;
     }
     h6 {
         margin: 4.5mm 0 1.6mm;
         font-size: 10.5pt;
-        font-weight: 700;
         letter-spacing: 0.06em;
         text-transform: uppercase;
         color: #555;
@@ -377,6 +538,7 @@ tr:last-child td { border-bottom: 0; }
         padding: 0 0 4mm;
         font-size: 13.5pt;
         cursor: default;
+        color: #111;
     }
 
     .references summary::marker { content: ''; }
@@ -406,7 +568,7 @@ tr:last-child td { border-bottom: 0; }
  * ------------------------------------------------------------------ */
 
 a {
-    color: #3a5f8a;
+    color: var(--link);
     text-decoration: underline;
     text-underline-offset: 2px;
 }
@@ -417,7 +579,7 @@ em { font-style: italic; }
 /* Transcript: speaker turns ("**Name**: …") rendered one per line (<br>-separated),
    with the bold speaker label tinted so turns are easy to scan. */
 p.transcript { line-height: 1.7; }
-p.transcript strong { color: #3a5f8a; }
+p.transcript strong { color: var(--link); }
 
 /* Inline code chip: pale beige background, vermilion text, rounded outline. */
 code {
@@ -544,7 +706,10 @@ ul ul, ul ol, ol ul, ol ol {
     padding-left: 1.3rem;
 }
 
-hr {
+/* `---` → a thin horizontal rule in the document/print view; the same element doubles as
+   the slide boundary (`.slide-sep`) that slide mode paginates on. */
+hr,
+hr.slide-sep {
     margin: 2.2rem 0;
     border: 0;
     border-top: 1px solid var(--line);

@@ -180,6 +180,8 @@ class PreviewManager {
             articleHtml: result.articleHtml,
             css: this.cssText,
             nonce: getNonce(),
+            theme: cfg.defaultTheme,
+            mode: cfg.defaultMode,
         });
         return { html, result };
     }
@@ -218,6 +220,22 @@ class PreviewManager {
         }
         this.openInBrowser(tmpPath);
         vscode.window.setStatusBarMessage("브라우저에서 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P).", 6000);
+    }
+    /** Toggle document ⇄ slide view in the live preview (no-op with a hint if none is open). */
+    toggleSlideMode() {
+        if (!this.panel) {
+            vscode.window.showInformationMessage("먼저 미리보기를 여세요 (Markdown HTML Preview: Open).");
+            return;
+        }
+        void this.panel.webview.postMessage({ type: "setMode", mode: "toggle" });
+    }
+    /** Toggle light ⇄ dark theme in the live preview. */
+    toggleTheme() {
+        if (!this.panel) {
+            vscode.window.showInformationMessage("먼저 미리보기를 여세요 (Markdown HTML Preview: Open).");
+            return;
+        }
+        void this.panel.webview.postMessage({ type: "setTheme", theme: "toggle" });
     }
     /**
      * Open a local file in the OS default app (the browser, for .html) using the RAW
@@ -264,6 +282,8 @@ class PreviewManager {
             plainCitations: cfg.get("plainCitations", true),
             debounceMs: Math.max(0, cfg.get("debounceMs", 200)),
             scrollSync: cfg.get("scrollSync", true),
+            defaultTheme: cfg.get("defaultTheme", "dark") === "light" ? "light" : "dark",
+            defaultMode: cfg.get("defaultMode", "document") === "slide" ? "slide" : "document",
         };
     }
     titleFor(uri) {
@@ -424,6 +444,8 @@ class PreviewManager {
             cspSource: webview.cspSource,
             nonce: getNonce(),
             scrollSync: cfg.scrollSync,
+            theme: cfg.defaultTheme,
+            mode: cfg.defaultMode,
         });
         webview.html = html;
         this.panel.title = this.titleFor(this.sourceUri);

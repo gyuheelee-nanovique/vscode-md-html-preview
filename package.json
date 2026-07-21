@@ -2,7 +2,7 @@
   "name": "vscode-md-html-preview",
   "displayName": "Markdown HTML Preview (Paper)",
   "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, Mermaid diagrams, image embedding, foldable references, docling tables, and A4 print CSS. Mirrors the standalone HTML produced by tools/pdf_to_html.py.",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "publisher": "nanovique",
   "license": "MIT",
   "repository": {
@@ -30,6 +30,8 @@
     "onCommand:mdHtmlPreview.open",
     "onCommand:mdHtmlPreview.exportHtml",
     "onCommand:mdHtmlPreview.print",
+    "onCommand:mdHtmlPreview.toggleSlideMode",
+    "onCommand:mdHtmlPreview.toggleTheme",
     "onWebviewPanel:mdHtmlPreview"
   ],
   "contributes": {
@@ -51,6 +53,18 @@
         "title": "Print / Save as PDF",
         "category": "Markdown HTML Preview",
         "icon": "$(printer)"
+      },
+      {
+        "command": "mdHtmlPreview.toggleSlideMode",
+        "title": "Toggle Slide Mode",
+        "category": "Markdown HTML Preview",
+        "icon": "$(screen-full)"
+      },
+      {
+        "command": "mdHtmlPreview.toggleTheme",
+        "title": "Toggle Dark / Light Theme",
+        "category": "Markdown HTML Preview",
+        "icon": "$(color-mode)"
       }
     ],
     "menus": {
@@ -73,6 +87,14 @@
         {
           "command": "mdHtmlPreview.print",
           "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+        },
+        {
+          "command": "mdHtmlPreview.toggleSlideMode",
+          "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+        },
+        {
+          "command": "mdHtmlPreview.toggleTheme",
+          "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
         }
       ]
     },
@@ -87,6 +109,18 @@
         "command": "mdHtmlPreview.print",
         "key": "ctrl+'",
         "mac": "cmd+'",
+        "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+      },
+      {
+        "command": "mdHtmlPreview.toggleSlideMode",
+        "key": "ctrl+shift+alt+s",
+        "mac": "cmd+shift+alt+s",
+        "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+      },
+      {
+        "command": "mdHtmlPreview.toggleTheme",
+        "key": "ctrl+shift+alt+d",
+        "mac": "cmd+shift+alt+d",
         "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
       }
     ],
@@ -125,6 +159,24 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Synchronize scroll position between the Markdown editor and the HTML preview in both directions."
+        },
+        "mdHtmlPreview.defaultTheme": {
+          "type": "string",
+          "enum": [
+            "light",
+            "dark"
+          ],
+          "default": "dark",
+          "markdownDescription": "Theme a freshly opened preview starts in. The right-click menu (or `Toggle Dark / Light Theme`) overrides it for the session. **Printing / Save as PDF always uses the light theme** regardless of this setting."
+        },
+        "mdHtmlPreview.defaultMode": {
+          "type": "string",
+          "enum": [
+            "document",
+            "slide"
+          ],
+          "default": "document",
+          "markdownDescription": "View a freshly opened preview starts in. `slide` paginates the document on `---` separators; the right-click menu (or `Toggle Slide Mode`) switches at any time. Printing always uses the continuous document form."
         }
       }
     }

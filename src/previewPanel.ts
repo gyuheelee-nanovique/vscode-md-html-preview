@@ -37,6 +37,8 @@ interface PreviewConfig {
   plainCitations: boolean;
   debounceMs: number;
   scrollSync: boolean;
+  defaultTheme: "light" | "dark";
+  defaultMode: "document" | "slide";
 }
 
 function guessMime(file: string): string {
@@ -180,6 +182,8 @@ export class PreviewManager {
       articleHtml: result.articleHtml,
       css: this.cssText,
       nonce: getNonce(),
+      theme: cfg.defaultTheme,
+      mode: cfg.defaultMode,
     });
     return { html, result };
   }
@@ -224,6 +228,28 @@ export class PreviewManager {
       "브라우저에서 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P).",
       6000
     );
+  }
+
+  /** Toggle document ⇄ slide view in the live preview (no-op with a hint if none is open). */
+  toggleSlideMode(): void {
+    if (!this.panel) {
+      vscode.window.showInformationMessage(
+        "먼저 미리보기를 여세요 (Markdown HTML Preview: Open)."
+      );
+      return;
+    }
+    void this.panel.webview.postMessage({ type: "setMode", mode: "toggle" });
+  }
+
+  /** Toggle light ⇄ dark theme in the live preview. */
+  toggleTheme(): void {
+    if (!this.panel) {
+      vscode.window.showInformationMessage(
+        "먼저 미리보기를 여세요 (Markdown HTML Preview: Open)."
+      );
+      return;
+    }
+    void this.panel.webview.postMessage({ type: "setTheme", theme: "toggle" });
   }
 
   /**
@@ -272,6 +298,8 @@ export class PreviewManager {
       plainCitations: cfg.get<boolean>("plainCitations", true),
       debounceMs: Math.max(0, cfg.get<number>("debounceMs", 200)),
       scrollSync: cfg.get<boolean>("scrollSync", true),
+      defaultTheme: cfg.get<string>("defaultTheme", "dark") === "light" ? "light" : "dark",
+      defaultMode: cfg.get<string>("defaultMode", "document") === "slide" ? "slide" : "document",
     };
   }
 
@@ -458,6 +486,8 @@ export class PreviewManager {
       cspSource: webview.cspSource,
       nonce: getNonce(),
       scrollSync: cfg.scrollSync,
+      theme: cfg.defaultTheme,
+      mode: cfg.defaultMode,
     });
 
     webview.html = html;

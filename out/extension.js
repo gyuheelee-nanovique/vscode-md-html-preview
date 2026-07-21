@@ -65,7 +65,7 @@ function activate(context) {
             return;
         }
         await manager.exportHtml(editor);
-    }), vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()));
+    }), vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()), vscode.commands.registerCommand("mdHtmlPreview.toggleSlideMode", () => manager.toggleSlideMode()), vscode.commands.registerCommand("mdHtmlPreview.toggleTheme", () => manager.toggleTheme()));
     // Discard any panel restored after a window reload — the live preview is cheap to
     // reopen and we deliberately do not persist the source-document binding.
     if (vscode.window.registerWebviewPanelSerializer) {
