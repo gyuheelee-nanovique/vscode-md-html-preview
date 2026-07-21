@@ -50,24 +50,8 @@ if (window.hljs) {
     try { window.hljs.highlightElement(el); } catch (err) { /* unknown language: leave plain */ }
   });
 }
-if (window.mermaid && document.querySelector('pre.mermaid')) {
-  try {
-    window.mermaid.initialize({ startOnLoad: false, securityLevel: 'strict' });
-    // mermaid.run() reads each pre.mermaid's textContent and replaces it with an <svg>.
-    // It is async; swallow rejection so one bad diagram leaves its raw source in place
-    // without breaking KaTeX/scroll-sync that ran synchronously above.
-    var remap = function () {
-      try {
-        if (window.acquireVsCodeApi || window.parent !== window) {
-          window.postMessage({ type: 'remap' }, '*');
-        } else if (typeof window.__deckRefresh === 'function') {
-          window.__deckRefresh();
-        }
-      } catch (e) { /* export mode: no message channel, nothing to remap */ }
-    };
-    Promise.resolve(window.mermaid.run()).then(remap, remap);
-  } catch (err) { /* mermaid init failed: leave raw source */ }
-}`.trim();
+// Mermaid is handled separately by runMermaid() in the client script so its colours can
+// track the active theme and re-render on a theme toggle (see below).`.trim();
 /**
  * The unified client bootstrap. `IS_PREVIEW` selects the state backend (VS Code webview
  * state vs. localStorage) and whether scroll-sync runs. Written with string concatenation
@@ -111,8 +95,58 @@ function clientScript(isPreview, nonce, scrollSync) {
     root.setAttribute('data-theme', theme);
     writeState({ theme: theme });
     syncMenu();
+    runMermaid(afterRender); // recolour diagrams for the new theme (+ refresh deck/line map)
   }
   function toggleTheme() { applyTheme(theme === 'dark' ? 'light' : 'dark'); }
+
+  // ---- Mermaid: palette derived from the active theme, re-rendered on theme change ----
+  var mermaidStashed = false;
+  function mermaidThemeVars() {
+    var cs = getComputedStyle(root);
+    function v(name, fb) { var x = (cs.getPropertyValue(name) || '').trim(); return x || fb; }
+    var bg = v('--bg', '#ffffff'), ink = v('--ink', '#111111'), soft = v('--soft', '#eeeeee'),
+        line = v('--line', '#cccccc'), muted = v('--muted', '#666666'),
+        accent = v('--accent', '#cf4520'), heading = v('--heading', ink);
+    // Diagrams share the page's warm palette in both modes: cream/warm-dark node fills,
+    // vermilion borders (same accent as inline code and block-quotes), and arrows in the
+    // muted tone so they stay clearly visible on the dark background.
+    return {
+      background: bg,
+      mainBkg: soft, primaryColor: soft, secondaryColor: bg, tertiaryColor: bg,
+      primaryTextColor: ink, secondaryTextColor: ink, tertiaryTextColor: ink,
+      textColor: ink, nodeTextColor: ink, titleColor: heading,
+      primaryBorderColor: accent, nodeBorder: accent,
+      secondaryBorderColor: line, tertiaryBorderColor: line,
+      clusterBkg: bg, clusterBorder: line,
+      lineColor: muted, edgeLabelBackground: bg,
+      fontFamily: "'Presentation', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+    };
+  }
+  function runMermaid(done) {
+    if (!window.mermaid) { if (done) done(); return; }
+    var nodes = document.querySelectorAll('pre.mermaid');
+    if (!nodes.length) { if (done) done(); return; }
+    for (var i = 0; i < nodes.length; i++) {
+      var el = nodes[i];
+      // Stash the raw source on the first run and restore it on every re-run: Mermaid
+      // replaces the element's text with an <svg>, so re-theming needs the original source.
+      if (!mermaidStashed) el.setAttribute('data-src', el.textContent);
+      else el.textContent = el.getAttribute('data-src') || el.textContent;
+      el.removeAttribute('data-processed');
+    }
+    mermaidStashed = true;
+    try {
+      window.mermaid.initialize({
+        startOnLoad: false, securityLevel: 'strict', theme: 'base',
+        themeVariables: mermaidThemeVars()
+      });
+      Promise.resolve(window.mermaid.run({ nodes: Array.prototype.slice.call(nodes) }))
+        .then(function () { if (done) done(); }, function () { if (done) done(); });
+    } catch (e) { if (done) done(); }
+  }
+  // After (re-)rendering diagrams: refresh the scroll-sync line map and, in slide mode,
+  // rebuild the deck so it clones the freshly rendered SVGs.
+  function afterRender() { buildMap(); if (mode === 'slide') buildDeck(); }
 
   // ---- auto-hiding scrollbar (thumb tinted only while the element scrolls) ----
   function autoHide(el) {
@@ -182,8 +216,6 @@ function clientScript(isPreview, nonce, scrollSync) {
   }
   function nextSlide() { showSlide(slideIndex + 1); }
   function prevSlide() { showSlide(slideIndex - 1); }
-  // Let RENDER_BODY's mermaid remap rebuild the deck in export mode once diagrams resolve.
-  window.__deckRefresh = function () { if (mode === 'slide') buildDeck(); };
 
   // ---- view mode ----
   function applyMode(m) {
@@ -342,9 +374,6 @@ function clientScript(isPreview, nonce, scrollSync) {
       if (!IS_PREVIEW || !SCROLL_SYNC || mode === 'slide') return;
       if (!lineMap.length) buildMap();
       scrollToLine(msg.line);
-    } else if (msg.type === 'remap') {
-      buildMap();
-      if (mode === 'slide') buildDeck();
     } else if (msg.type === 'setTheme') {
       applyTheme(msg.theme === 'toggle' ? (theme === 'dark' ? 'light' : 'dark') : msg.theme);
     } else if (msg.type === 'setMode') {
@@ -359,8 +388,9 @@ function clientScript(isPreview, nonce, scrollSync) {
     autoHide(window);
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', buildMap);
-    buildMap();
     applyMode(mode); // builds the deck when starting in slide mode
+    runMermaid(afterRender); // render diagrams in the active theme, then refresh deck/map
+    buildMap();
     if (mode === 'document') {
       var prev = readState();
       if (prev && typeof prev.scrollY === 'number') window.scrollTo(0, prev.scrollY);

@@ -165,7 +165,13 @@ class PreviewManager {
         return this.sourceUri;
     }
     /** Render the document as a self-contained HTML document (base64 images, no sync attrs). */
-    buildStandaloneHtml(uri, doc) {
+    /**
+     * `forPrint` bakes the light theme + continuous document view into the file. Mermaid
+     * renders its colours *into* the SVG, so a page opened in dark mode would still carry a
+     * dark diagram onto white paper even though `@media print` resets the CSS palette —
+     * generating the print file as light is what actually guarantees a light printout.
+     */
+    buildStandaloneHtml(uri, doc, forPrint = false) {
         const cfg = this.readConfig(uri);
         const baseDir = uri.scheme === "file" ? path.dirname(uri.fsPath) : undefined;
         const result = (0, markdownRenderer_1.markdownToArticleHtml)(doc.getText(), {
@@ -180,8 +186,8 @@ class PreviewManager {
             articleHtml: result.articleHtml,
             css: this.cssText,
             nonce: getNonce(),
-            theme: cfg.defaultTheme,
-            mode: cfg.defaultMode,
+            theme: forPrint ? "light" : cfg.defaultTheme,
+            mode: forPrint ? "document" : cfg.defaultMode,
         });
         return { html, result };
     }
@@ -205,7 +211,7 @@ class PreviewManager {
             vscode.window.showWarningMessage("문서를 열 수 없습니다.");
             return;
         }
-        const { html } = this.buildStandaloneHtml(uri, doc);
+        const { html } = this.buildStandaloneHtml(uri, doc, true);
         const rawBase = path.basename(uri.fsPath || uri.path).replace(/\.(md|markdown)$/i, "");
         // Keep the temp filename ASCII-only: a non-ASCII name (e.g. Korean) gets percent-
         // encoded by Uri.file and ShellExecute then fails to find the literal file (error 0x2).

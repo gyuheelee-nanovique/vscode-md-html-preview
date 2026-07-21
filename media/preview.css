@@ -247,7 +247,9 @@ tr:last-child td { border-bottom: 0; }
  * The original <main> stays intact but hidden, so printing (below) uses it verbatim.
  * ------------------------------------------------------------------ */
 
-:root[data-mode="slide"] main { display: none; }
+/* In slide mode the original <main> stays laid out (so async renderers like Mermaid can
+   measure text — a display:none container collapses their SVG to zero size), but is fully
+   covered by the opaque, full-viewport .deck. Only the body scroll is suppressed. */
 :root[data-mode="slide"] body { overflow: hidden; }
 
 .deck {
