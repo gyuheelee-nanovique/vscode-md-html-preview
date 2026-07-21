@@ -14,17 +14,53 @@ import { escapeAttr } from "../htmlEscape";
 
 export type InlineRenderer = (text: string) => string;
 
-const TABLE_SEPARATOR_RE = /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/;
+// GFM allows a separator cell to be as short as a single dash, with optional alignment
+// colons (`:--`, `--:`, `:-:`). The previous `-{3,}` missed `:--`, so the separator row
+// was treated as data and its markers showed up as a visible first table row. The trailing
+// group is `*` (not `+`) so single-column tables (`|:--|`) are recognised too.
+const TABLE_SEPARATOR_RE = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/;
+
+export type ColumnAlign = "left" | "center" | "right" | null;
+
+/** Split a pipe row into trimmed cells, dropping all leading/trailing pipes. */
+function splitRow(line: string): string[] {
+  return line
+    .trim()
+    .replace(/^\|+/, "")
+    .replace(/\|+$/, "")
+    .split("|")
+    .map((c) => c.trim());
+}
+
+/** Per-column alignment encoded by the separator row's colons. */
+export function parseAlignments(line: string): ColumnAlign[] {
+  return splitRow(line).map((c) => {
+    const left = c.startsWith(":");
+    const right = c.endsWith(":");
+    if (left && right) {
+      return "center";
+    }
+    if (right) {
+      return "right";
+    }
+    if (left) {
+      return "left";
+    }
+    return null;
+  });
+}
+
+export function isSeparatorRow(line: string): boolean {
+  return TABLE_SEPARATOR_RE.test(line.trim());
+}
 
 export function parsePipeTable(lines: string[]): string[][] {
   const rows: string[][] = [];
   lines.forEach((line, idx) => {
-    const stripped = line.trim();
-    if (idx === 1 && TABLE_SEPARATOR_RE.test(stripped)) {
+    if (idx === 1 && isSeparatorRow(line)) {
       return;
     }
-    // Strip ALL leading/trailing pipes (Python str.strip('|')), not just one per side.
-    rows.push(stripped.replace(/^\|+/, "").replace(/\|+$/, "").split("|").map((c) => c.trim()));
+    rows.push(splitRow(line));
   });
   return rows;
 }
@@ -49,13 +85,16 @@ interface CellAttrs {
 }
 
 /** Build a `<th>`/`<td>`. `inner` is already-rendered, safe inline HTML (see `inline`). */
-function cell(tag: string, inner = "", attrs: CellAttrs = {}): string {
+function cell(tag: string, inner = "", attrs: CellAttrs = {}, align: ColumnAlign = null): string {
   let rendered = "";
   if (attrs.rowspan !== undefined) {
     rendered += ` rowspan="${escapeAttr(String(attrs.rowspan))}"`;
   }
   if (attrs.colspan !== undefined) {
     rendered += ` colspan="${escapeAttr(String(attrs.colspan))}"`;
+  }
+  if (align) {
+    rendered += ` class="ta-${align}"`;
   }
   return `<${tag}${rendered}>${inner}</${tag}>`;
 }
@@ -112,17 +151,21 @@ export function renderTable(
   if (isSimulationTable(rows)) {
     return renderSimulationTable(rows, caption, inline);
   }
+  const align =
+    lines.length > 1 && isSeparatorRow(lines[1]) ? parseAlignments(lines[1]) : [];
   const head = rows[0];
   const body = rows.slice(1);
   const parts: string[] = ['<div class="table-scroll"><table>'];
   if (caption) {
     parts.push(`<caption>${inline(caption)}</caption>`);
   }
-  parts.push("<thead>" + tr(head.map((c) => cell("th", inline(c)))) + "</thead>");
+  parts.push(
+    "<thead>" + tr(head.map((c, i) => cell("th", inline(c), {}, align[i] ?? null))) + "</thead>"
+  );
   if (body.length > 0) {
     parts.push("<tbody>");
     for (const row of body) {
-      parts.push(tr(row.map((c) => cell("td", inline(c)))));
+      parts.push(tr(row.map((c, i) => cell("td", inline(c), {}, align[i] ?? null))));
     }
     parts.push("</tbody>");
   }

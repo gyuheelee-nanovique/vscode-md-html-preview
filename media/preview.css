@@ -191,6 +191,11 @@ th {
 
 tr:last-child td { border-bottom: 0; }
 
+/* GFM column alignment from the separator row (`:--`, `:-:`, `--:`). */
+th.ta-left,   td.ta-left   { text-align: left; }
+th.ta-center, td.ta-center { text-align: center; }
+th.ta-right,  td.ta-right  { text-align: right; }
+
 .reference {
     color: var(--muted);
     font-size: 0.92rem;
@@ -646,6 +651,45 @@ pre.mermaid svg {
     max-width: 100%;
     height: auto;
     margin: 0 auto;
+}
+
+/* Unify every diagram block with the page theme. A document's own `classDef … fill:#e3f2fd`
+   / `style` colours are overridden here, so a deck keeps one tone instead of mixing in
+   stock blues and oranges. These are CSS variables, so a theme toggle restyles diagrams
+   immediately — and `!important` is what outranks the per-diagram styles Mermaid inlines. */
+pre.mermaid .node rect,
+pre.mermaid .node polygon,
+pre.mermaid .node circle,
+pre.mermaid .node ellipse,
+pre.mermaid .node path {
+    fill: var(--soft) !important;
+    stroke: var(--accent) !important;
+}
+
+/* Subgraph containers sit a step back from the nodes they hold. */
+pre.mermaid .cluster rect {
+    fill: var(--bg) !important;
+    stroke: var(--line) !important;
+}
+
+pre.mermaid .nodeLabel,
+pre.mermaid .nodeLabel *,
+pre.mermaid .node text,
+pre.mermaid .cluster-label,
+pre.mermaid .cluster-label * {
+    color: var(--ink) !important;
+    fill: var(--ink) !important;
+}
+
+/* Connectors and their arrowheads follow the muted tone in both themes. */
+pre.mermaid .edgePath path,
+pre.mermaid .flowchart-link {
+    stroke: var(--muted) !important;
+}
+
+pre.mermaid marker path {
+    fill: var(--muted) !important;
+    stroke: var(--muted) !important;
 }
 
 @media print {

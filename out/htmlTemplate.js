@@ -141,8 +141,39 @@ function clientScript(isPreview, nonce, scrollSync) {
         themeVariables: mermaidThemeVars()
       });
       Promise.resolve(window.mermaid.run({ nodes: Array.prototype.slice.call(nodes) }))
-        .then(function () { if (done) done(); }, function () { if (done) done(); });
+        .then(function () { themeDiagrams(); if (done) done(); },
+              function () { if (done) done(); });
     } catch (e) { if (done) done(); }
+  }
+  // Repaint every diagram in the page palette. Mermaid writes a document's own
+  // 'classDef … fill:#e3f2fd' as an INLINE style with !important, which no stylesheet rule
+  // can outrank — the only way to win is to re-set the property on that same inline
+  // declaration, which is what setProperty(..., 'important') does here. Runs after each
+  // render (including the re-render on a theme toggle), so decks keep one tone throughout.
+  function themeDiagrams() {
+    var cs = getComputedStyle(root);
+    function v(name, fb) { var x = (cs.getPropertyValue(name) || '').trim(); return x || fb; }
+    var soft = v('--soft', '#eeeeee'), accent = v('--accent', '#cf4520'),
+        ink = v('--ink', '#111111'), bg = v('--bg', '#ffffff'),
+        line = v('--line', '#cccccc'), muted = v('--muted', '#666666');
+    function force(el, prop, val) { try { el.style.setProperty(prop, val, 'important'); } catch (e) {} }
+    function paint(scope, sel, props) {
+      var els = scope.querySelectorAll(sel);
+      for (var i = 0; i < els.length; i++) {
+        for (var k = 0; k < props.length; k++) force(els[i], props[k][0], props[k][1]);
+      }
+    }
+    var diagrams = document.querySelectorAll('pre.mermaid');
+    for (var d = 0; d < diagrams.length; d++) {
+      var m = diagrams[d];
+      paint(m, '.node rect, .node polygon, .node circle, .node ellipse, .node path',
+            [['fill', soft], ['stroke', accent]]);
+      paint(m, '.cluster rect', [['fill', bg], ['stroke', line]]);
+      paint(m, '.nodeLabel, .nodeLabel *, .node text, .node tspan, .cluster-label, .cluster-label *',
+            [['color', ink], ['fill', ink]]);
+      paint(m, '.edgePath path, .flowchart-link', [['stroke', muted]]);
+      paint(m, 'marker path', [['fill', muted], ['stroke', muted]]);
+    }
   }
   // After (re-)rendering diagrams: refresh the scroll-sync line map and, in slide mode,
   // rebuild the deck so it clones the freshly rendered SVGs.
