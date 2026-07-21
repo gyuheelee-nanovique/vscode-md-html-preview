@@ -227,8 +227,11 @@ tr:last-child td { border-bottom: 0; }
 @media print {
     html,
     body {
-        width: 210mm;
-        min-height: 297mm;
+        /* Let @page (size + margin) define the sheet and printable column. Forcing the
+           body to the full 210mm sheet width made it 40mm wider than the printable area,
+           so any "fit to page"/reduced-scale print setting shrank the whole page (smaller
+           text, anchored top-left). width:auto keeps the body inside the printable box. */
+        width: auto;
         background: #fff;
         color: #111;
         font-size: 10.5pt;
