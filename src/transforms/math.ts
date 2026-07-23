@@ -41,8 +41,80 @@ function replaceAll(text: string, find: string, replace: string): string {
   return text.split(find).join(replace);
 }
 
+/**
+ * KaTeX (unlike LaTeX) requires a base atom before `^`/`_`. The common degree idiom
+ * `10\,^\circ\text{C}` puts a spacing macro — not a base — directly before `^`, so KaTeX
+ * rejects it and renders the whole span as red raw source. Inserting an empty group makes
+ * `\,^\circ` → `\,{}^\circ`: identical output, but valid. Only spacing macros are matched,
+ * so a real base like `10^\circ` (→ "10°") is left untouched.
+ */
+function fixBaselessScripts(expr: string): string {
+  return expr.replace(/(\\[,;:!]|\\quad|\\qquad|\\ )(\s*)([\^_])/g, "$1$2{}$3");
+}
+
+/**
+ * Unicode symbols that are math-mode-only in KaTeX. Inside `\text{…}` (text mode) they
+ * error and render as red raw source — the classic case is the middle dot in `\text{Pa·s}`
+ * (KaTeX maps `·` to `\cdotp`, a math command). The fix breaks the text run at each such
+ * character and drops in its math command, so `\text{Pa·s}` → `\text{Pa}\cdot\text{s}`.
+ */
+const TEXT_MODE_UNICODE: Record<string, string> = {
+  "·": "\\cdot", "⋅": "\\cdot", "×": "\\times", "÷": "\\div",
+  "→": "\\rightarrow", "←": "\\leftarrow", "↔": "\\leftrightarrow",
+  "⇒": "\\Rightarrow", "⇐": "\\Leftarrow", "⇔": "\\Leftrightarrow", "↦": "\\mapsto",
+  "−": "-", "±": "\\pm", "∓": "\\mp",
+  "≤": "\\le", "≥": "\\ge", "≠": "\\ne", "≈": "\\approx", "≡": "\\equiv",
+  "∝": "\\propto", "≪": "\\ll", "≫": "\\gg", "∼": "\\sim",
+  "∞": "\\infty", "∂": "\\partial", "∇": "\\nabla", "√": "\\surd",
+  "∑": "\\sum", "∏": "\\prod", "∫": "\\int", "∮": "\\oint", "∈": "\\in", "∉": "\\notin",
+  "°": "^\\circ", "′": "'", "″": "''", "∘": "\\circ", "∙": "\\bullet", "•": "\\bullet",
+  "α": "\\alpha", "β": "\\beta", "γ": "\\gamma", "δ": "\\delta", "ε": "\\varepsilon",
+  "ζ": "\\zeta", "η": "\\eta", "θ": "\\theta", "ϑ": "\\vartheta", "ι": "\\iota",
+  "κ": "\\kappa", "λ": "\\lambda", "μ": "\\mu", "ν": "\\nu", "ξ": "\\xi", "π": "\\pi",
+  "ρ": "\\rho", "σ": "\\sigma", "ς": "\\varsigma", "τ": "\\tau", "υ": "\\upsilon",
+  "φ": "\\phi", "ϕ": "\\phi", "χ": "\\chi", "ψ": "\\psi", "ω": "\\omega",
+  "Γ": "\\Gamma", "Δ": "\\Delta", "∆": "\\Delta", "Θ": "\\Theta", "Λ": "\\Lambda",
+  "Ξ": "\\Xi", "Π": "\\Pi", "Σ": "\\Sigma", "Φ": "\\Phi", "Ψ": "\\Psi", "Ω": "\\Omega",
+};
+
+const TEXT_MODE_RE = new RegExp("[" + Object.keys(TEXT_MODE_UNICODE).join("") + "]");
+
+/**
+ * Turn a run of would-be `\text{…}` content into a valid mix of `\text{…}` and math: literal
+ * stretches stay wrapped in `\text{}`, and each math-mode-only unicode symbol becomes its
+ * command. Used both to repair `\text{…}` inside equations and to build multi-line Mermaid
+ * labels (see markdownRenderer). Returns a fragment for math context, never wrapped itself.
+ */
+export function sanitizeTextRun(text: string): string {
+  if (!TEXT_MODE_RE.test(text)) {
+    return text ? `\\text{${text}}` : "";
+  }
+  let out = "";
+  let buf = "";
+  for (const ch of text) {
+    const cmd = TEXT_MODE_UNICODE[ch];
+    if (cmd !== undefined) {
+      if (buf) {
+        out += `\\text{${buf}}`;
+        buf = "";
+      }
+      out += cmd;
+    } else {
+      buf += ch;
+    }
+  }
+  if (buf) {
+    out += `\\text{${buf}}`;
+  }
+  return out;
+}
+
+function fixTextModeUnicode(expr: string): string {
+  return expr.replace(/\\text\{([^{}]*)\}/g, (_m, inner: string) => sanitizeTextRun(inner));
+}
+
 export function normalizeMath(expr: string): string {
-  let out = expr.trim();
+  let out = fixTextModeUnicode(fixBaselessScripts(expr.trim()));
   for (const [oldStr, newStr] of MATH_REPLACEMENTS) {
     out = replaceAll(out, oldStr, newStr);
   }

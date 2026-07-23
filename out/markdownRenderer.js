@@ -25,6 +25,7 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.inline = inline;
+exports.prepareMermaidMath = prepareMermaidMath;
 exports.addSourceLine = addSourceLine;
 exports.stripHtmlComments = stripHtmlComments;
 exports.markdownToArticleHtml = markdownToArticleHtml;
@@ -139,6 +140,48 @@ function startsNewBlock(line, inReferences) {
         IMAGE_LINE_RE.test(s) ||
         line.replace(/^\s+/, "").startsWith("|") ||
         (inReferences && references_1.REFERENCE_LINE_RE.test(s)));
+}
+/** One `<br/>`-separated label line → a KaTeX fragment (text runs in `\text{}`, math kept). */
+function mermaidLineToKatex(line) {
+    const re = /\$\$([\s\S]+?)\$\$|\$([^$]+?)\$/g;
+    let out = "";
+    let last = 0;
+    let m;
+    while ((m = re.exec(line)) !== null) {
+        out += (0, math_1.sanitizeTextRun)(line.slice(last, m.index));
+        out += (0, math_1.normalizeMath)(m[1] !== undefined ? m[1] : m[2]);
+        last = re.lastIndex;
+    }
+    out += (0, math_1.sanitizeTextRun)(line.slice(last));
+    return out || "\\text{}";
+}
+/**
+ * Prepare LaTeX inside Mermaid labels. Mermaid only renders math wrapped in double dollars
+ * (`$$…$$`); a single `$…$` leaks as raw text — and these documents write inline math with a
+ * single `$` — so single-`$` spans are upgraded to `$$`.
+ *
+ * A label that mixes `<br/>` with math is special: Mermaid's math renderer flattens `<br/>`
+ * to a space (the line break is lost). Mermaid also unescapes `\\`→`\`, so a KaTeX row break
+ * needs `\\\\` in the source. Such labels are rebuilt as one `\begin{gathered}` block whose
+ * lines are joined with `\\\\`, keeping the breaks while rendering the math. Labels with no
+ * `$` (plain text, where Mermaid's own `<br/>` handling already works) are left untouched.
+ */
+function prepareMermaidMath(source) {
+    return source.replace(/"([^"\n]*)"/g, (whole, label) => {
+        if (!label.includes("$")) {
+            return whole;
+        }
+        if (/<br\s*\/?>/i.test(label)) {
+            const lines = label
+                .split(/<br\s*\/?>/i)
+                .map((s) => s.trim())
+                .filter((s) => s.length > 0)
+                .map(mermaidLineToKatex);
+            return `"$$\\begin{gathered}${lines.join("\\\\\\\\")}\\end{gathered}$$"`;
+        }
+        const upgraded = label.replace(/\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g, (_m, display, inlineExpr) => `$$${(0, math_1.normalizeMath)(display !== undefined ? display : inlineExpr)}$$`);
+        return `"${upgraded}"`;
+    });
 }
 /** Stamp `data-source-line` onto the first opening tag of a rendered block. */
 function addSourceLine(html, line) {
@@ -297,7 +340,7 @@ function markdownToArticleHtml(md, options) {
             // HTML-escaped (it can contain `<br/>`, `&`, quotes) so it survives as plain text
             // until mermaid decodes it back via textContent.
             if (lang === "mermaid") {
-                pushBlock(`<pre class="mermaid">${(0, htmlEscape_1.escapeHtml)(codeLines.join("\n"))}</pre>`);
+                pushBlock(`<pre class="mermaid">${(0, htmlEscape_1.escapeHtml)(prepareMermaidMath(codeLines.join("\n")))}</pre>`);
                 continue;
             }
             const langClass = info ? ` class="language-${(0, htmlEscape_1.escapeAttr)(lang)}"` : "";

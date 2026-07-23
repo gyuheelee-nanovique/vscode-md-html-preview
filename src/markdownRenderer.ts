@@ -31,6 +31,7 @@ import {
   renderMathBlock,
   renderDisplayMath,
   textualMathFixes,
+  sanitizeTextRun,
 } from "./transforms/math";
 import { renderTable } from "./transforms/tables";
 import {
@@ -185,6 +186,54 @@ function startsNewBlock(line: string, inReferences: boolean): boolean {
     line.replace(/^\s+/, "").startsWith("|") ||
     (inReferences && REFERENCE_LINE_RE.test(s))
   );
+}
+
+/** One `<br/>`-separated label line → a KaTeX fragment (text runs in `\text{}`, math kept). */
+function mermaidLineToKatex(line: string): string {
+  const re = /\$\$([\s\S]+?)\$\$|\$([^$]+?)\$/g;
+  let out = "";
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line)) !== null) {
+    out += sanitizeTextRun(line.slice(last, m.index));
+    out += normalizeMath(m[1] !== undefined ? m[1] : m[2]);
+    last = re.lastIndex;
+  }
+  out += sanitizeTextRun(line.slice(last));
+  return out || "\\text{}";
+}
+
+/**
+ * Prepare LaTeX inside Mermaid labels. Mermaid only renders math wrapped in double dollars
+ * (`$$…$$`); a single `$…$` leaks as raw text — and these documents write inline math with a
+ * single `$` — so single-`$` spans are upgraded to `$$`.
+ *
+ * A label that mixes `<br/>` with math is special: Mermaid's math renderer flattens `<br/>`
+ * to a space (the line break is lost). Mermaid also unescapes `\\`→`\`, so a KaTeX row break
+ * needs `\\\\` in the source. Such labels are rebuilt as one `\begin{gathered}` block whose
+ * lines are joined with `\\\\`, keeping the breaks while rendering the math. Labels with no
+ * `$` (plain text, where Mermaid's own `<br/>` handling already works) are left untouched.
+ */
+export function prepareMermaidMath(source: string): string {
+  return source.replace(/"([^"\n]*)"/g, (whole, label: string) => {
+    if (!label.includes("$")) {
+      return whole;
+    }
+    if (/<br\s*\/?>/i.test(label)) {
+      const lines = label
+        .split(/<br\s*\/?>/i)
+        .map((s) => s.trim())
+        .filter((s) => s.length > 0)
+        .map(mermaidLineToKatex);
+      return `"$$\\begin{gathered}${lines.join("\\\\\\\\")}\\end{gathered}$$"`;
+    }
+    const upgraded = label.replace(
+      /\$\$([\s\S]+?)\$\$|\$([^$\n]+?)\$/g,
+      (_m, display: string | undefined, inlineExpr: string) =>
+        `$$${normalizeMath(display !== undefined ? display : inlineExpr)}$$`
+    );
+    return `"${upgraded}"`;
+  });
 }
 
 /** Stamp `data-source-line` onto the first opening tag of a rendered block. */
@@ -352,7 +401,7 @@ export function markdownToArticleHtml(md: string, options: RenderOptions): Rende
       // HTML-escaped (it can contain `<br/>`, `&`, quotes) so it survives as plain text
       // until mermaid decodes it back via textContent.
       if (lang === "mermaid") {
-        pushBlock(`<pre class="mermaid">${escapeHtml(codeLines.join("\n"))}</pre>`);
+        pushBlock(`<pre class="mermaid">${escapeHtml(prepareMermaidMath(codeLines.join("\n")))}</pre>`);
         continue;
       }
       const langClass = info ? ` class="language-${escapeAttr(lang)}"` : "";
