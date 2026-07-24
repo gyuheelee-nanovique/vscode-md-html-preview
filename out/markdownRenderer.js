@@ -28,6 +28,7 @@ exports.inline = inline;
 exports.prepareMermaidMath = prepareMermaidMath;
 exports.addSourceLine = addSourceLine;
 exports.stripHtmlComments = stripHtmlComments;
+exports.commentLineMask = commentLineMask;
 exports.markdownToArticleHtml = markdownToArticleHtml;
 const htmlEscape_1 = require("./htmlEscape");
 const citations_1 = require("./transforms/citations");
@@ -183,9 +184,15 @@ function prepareMermaidMath(source) {
         return `"${upgraded}"`;
     });
 }
-/** Stamp `data-source-line` onto the first opening tag of a rendered block. */
-function addSourceLine(html, line) {
-    return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, (_m, head) => `${head} data-source-line="${line}"`);
+/**
+ * Stamp the block's source-line SPAN onto its first opening tag. Scroll-sync interpolates
+ * within `[data-source-line, data-source-line-end]` using the block's real pixel bounds, so
+ * a block that is tall in the preview but short in source (image, Mermaid) — or the reverse
+ * — maps accurately, and comment/blank gaps between blocks act as dead zones. Start-only
+ * anchors made the mapping drift across such gaps.
+ */
+function addSourceLine(html, line, endLine = line) {
+    return html.replace(/^(\s*<[a-zA-Z][\w-]*)/, (_m, head) => `${head} data-source-line="${line}" data-source-line-end="${endLine}"`);
 }
 /**
  * Blank out HTML comments (`<!-- … -->`, single- or multi-line) so they don't render as
@@ -236,6 +243,63 @@ function stripHtmlComments(md) {
     }
     return out.join("\n");
 }
+/**
+ * Per-line mask of source lines that render to nothing because an HTML comment consumed
+ * them (the line had content, but after comment-stripping it is blank). Scroll-sync uses
+ * it to freeze the preview while the editor's centre line sits inside a comment — those
+ * lines have no visible counterpart to sync to. Mirrors `stripHtmlComments` exactly.
+ */
+function commentLineMask(md) {
+    const lines = md.split(/\r\n|\r|\n/);
+    const mask = new Array(lines.length).fill(false);
+    let inFence = false;
+    let fenceChar = "";
+    let inComment = false;
+    for (let idx = 0; idx < lines.length; idx += 1) {
+        const raw = lines[idx];
+        const t = raw.trim();
+        const fence = t.match(/^(`{3,}|~{3,})/);
+        if (!inComment && fence) {
+            if (!inFence) {
+                inFence = true;
+                fenceChar = fence[1][0];
+            }
+            else if (t[0] === fenceChar) {
+                inFence = false;
+            }
+            continue;
+        }
+        if (inFence) {
+            continue;
+        }
+        let line = raw;
+        let touched = false;
+        if (inComment) {
+            const end = line.indexOf("-->");
+            if (end < 0) {
+                mask[idx] = t.length > 0; // whole line still inside the comment
+                continue;
+            }
+            line = line.slice(end + 3);
+            inComment = false;
+            touched = true;
+        }
+        const before = line;
+        line = line.replace(/<!--[\s\S]*?-->/g, "");
+        if (line !== before) {
+            touched = true;
+        }
+        const open = line.lastIndexOf("<!--");
+        if (open >= 0 && line.indexOf("-->", open) < 0) {
+            line = line.slice(0, open);
+            inComment = true;
+            touched = true;
+        }
+        // Invisible only if a comment was involved AND nothing visible remains on the line.
+        mask[idx] = touched && line.trim().length === 0 && t.length > 0;
+    }
+    return mask;
+}
 function markdownToArticleHtml(md, options) {
     const { keepLinks, removeTopImages, openReferences, resolveImage } = options;
     const withLines = options.sourceLines !== false;
@@ -256,7 +320,10 @@ function markdownToArticleHtml(md, options) {
     // the block; `pushBlock` stamps it onto the block's outer element.
     let currentStartLine = 0;
     const pushBlock = (html) => {
-        blocks[blocks.length] = withLines ? addSourceLine(html, currentStartLine) : html;
+        // `i` has advanced to the line after this block for multi-line handlers; for single-line
+        // handlers it is still the start line — max() gives the correct last source line either way.
+        const endLine = Math.max(currentStartLine, i - 1);
+        blocks[blocks.length] = withLines ? addSourceLine(html, currentStartLine, endLine) : html;
     };
     while (i < lines.length) {
         const line = lines[i];

@@ -16,7 +16,7 @@ import * as os from "os";
 import * as crypto from "crypto";
 import { spawn } from "child_process";
 
-import { markdownToArticleHtml, RenderOptions, RenderResult } from "./markdownRenderer";
+import { markdownToArticleHtml, commentLineMask, RenderOptions, RenderResult } from "./markdownRenderer";
 import { buildHtmlDocument } from "./htmlTemplate";
 
 const MIME_BY_EXT: Record<string, string> = {
@@ -84,6 +84,8 @@ export class PreviewManager {
   private debounceTimer: ReturnType<typeof setTimeout> | undefined;
   /** While set (epoch ms), ignore editor scroll events — they were caused by us revealing. */
   private ignoreEditorScrollUntil = 0;
+  /** Cached comment-line mask, keyed by the document version it was computed from. */
+  private commentMaskCache: { version: number; mask: boolean[] } | undefined;
   private readonly cssText: string;
 
   constructor(private readonly context: vscode.ExtensionContext) {
@@ -110,7 +112,12 @@ export class PreviewManager {
     );
   }
 
-  /** Editor → preview: push the top visible source line to the Webview. */
+  /**
+   * Editor → preview: push the source line at the editor's vertical CENTRE to the Webview.
+   * If that centre line is inside an HTML comment (invisible in the preview) the update is
+   * skipped, so the preview freezes on the block before the comment until the centre reaches
+   * real text again.
+   */
   private onEditorScroll(e: vscode.TextEditorVisibleRangesChangeEvent): void {
     if (!this.panel || !this.sourceUri) {
       return;
@@ -128,10 +135,25 @@ export class PreviewManager {
     if (ranges.length === 0) {
       return;
     }
-    void this.panel.webview.postMessage({ type: "scrollToLine", line: ranges[0].start.line });
+    const first = ranges[0].start.line;
+    const last = ranges[ranges.length - 1].end.line;
+    const center = Math.floor((first + last) / 2);
+    const mask = this.commentMaskFor(e.textEditor.document);
+    if (mask[center]) {
+      return; // centre line is an invisible comment — freeze the preview
+    }
+    void this.panel.webview.postMessage({ type: "scrollToLine", line: center });
   }
 
-  /** Preview → editor: reveal the reported source line in the source editor. */
+  /** Comment-line mask for the document, cached per version (recomputed on edit). */
+  private commentMaskFor(doc: vscode.TextDocument): boolean[] {
+    if (!this.commentMaskCache || this.commentMaskCache.version !== doc.version) {
+      this.commentMaskCache = { version: doc.version, mask: commentLineMask(doc.getText()) };
+    }
+    return this.commentMaskCache.mask;
+  }
+
+  /** Preview → editor: reveal the reported source line CENTERED in the source editor. */
   private onPreviewMessage(message: { type?: string; line?: number }): void {
     if (!this.sourceUri || message.type !== "revealLine" || typeof message.line !== "number") {
       return;
@@ -147,7 +169,7 @@ export class PreviewManager {
     }
     const line = Math.max(0, Math.min(editor.document.lineCount - 1, Math.round(message.line)));
     this.ignoreEditorScrollUntil = Date.now() + 250;
-    editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop);
+    editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter);
   }
 
   /** Active Markdown editor's document, or the document the preview is bound to. */

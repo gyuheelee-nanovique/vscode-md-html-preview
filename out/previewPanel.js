@@ -118,7 +118,12 @@ class PreviewManager {
             }
         }), vscode.window.onDidChangeTextEditorVisibleRanges((e) => this.onEditorScroll(e)));
     }
-    /** Editor → preview: push the top visible source line to the Webview. */
+    /**
+     * Editor → preview: push the source line at the editor's vertical CENTRE to the Webview.
+     * If that centre line is inside an HTML comment (invisible in the preview) the update is
+     * skipped, so the preview freezes on the block before the comment until the centre reaches
+     * real text again.
+     */
     onEditorScroll(e) {
         if (!this.panel || !this.sourceUri) {
             return;
@@ -136,9 +141,23 @@ class PreviewManager {
         if (ranges.length === 0) {
             return;
         }
-        void this.panel.webview.postMessage({ type: "scrollToLine", line: ranges[0].start.line });
+        const first = ranges[0].start.line;
+        const last = ranges[ranges.length - 1].end.line;
+        const center = Math.floor((first + last) / 2);
+        const mask = this.commentMaskFor(e.textEditor.document);
+        if (mask[center]) {
+            return; // centre line is an invisible comment — freeze the preview
+        }
+        void this.panel.webview.postMessage({ type: "scrollToLine", line: center });
     }
-    /** Preview → editor: reveal the reported source line in the source editor. */
+    /** Comment-line mask for the document, cached per version (recomputed on edit). */
+    commentMaskFor(doc) {
+        if (!this.commentMaskCache || this.commentMaskCache.version !== doc.version) {
+            this.commentMaskCache = { version: doc.version, mask: (0, markdownRenderer_1.commentLineMask)(doc.getText()) };
+        }
+        return this.commentMaskCache.mask;
+    }
+    /** Preview → editor: reveal the reported source line CENTERED in the source editor. */
     onPreviewMessage(message) {
         if (!this.sourceUri || message.type !== "revealLine" || typeof message.line !== "number") {
             return;
@@ -152,7 +171,7 @@ class PreviewManager {
         }
         const line = Math.max(0, Math.min(editor.document.lineCount - 1, Math.round(message.line)));
         this.ignoreEditorScrollUntil = Date.now() + 250;
-        editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.AtTop);
+        editor.revealRange(new vscode.Range(line, 0, line, 0), vscode.TextEditorRevealType.InCenter);
     }
     /** Active Markdown editor's document, or the document the preview is bound to. */
     commandTargetUri() {

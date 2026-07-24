@@ -37,6 +37,13 @@
     --link: #3a5f8a;
     --hair: #e8e5dd;          /* table row hairlines */
     --th-ink: #312f2a;
+    /* Syntax highlighting (highlight.js) — light palette on the cream code fill. */
+    --hl-comment: #8f8b7a;
+    --hl-keyword: #b0432a;
+    --hl-string: #4f7a34;
+    --hl-number: #9a6a1a;
+    --hl-title: #2f6f9f;
+    --hl-type: #8250a8;
 }
 
 /* Dark theme — a warm dark that keeps the paper character (not a flat neutral grey). */
@@ -52,6 +59,13 @@
     --link: #92b4e6;
     --hair: #322f2a;
     --th-ink: #ece8df;
+    /* Syntax highlighting — brighter palette that reads on the warm-dark code fill. */
+    --hl-comment: #8f897c;
+    --hl-keyword: #ff8159;
+    --hl-string: #a6c986;
+    --hl-number: #e6ab68;
+    --hl-title: #83b4ec;
+    --hl-type: #cba6f0;
 }
 
 * { box-sizing: border-box; }
@@ -624,12 +638,50 @@ pre code {
     font-size: 0.86rem;
 }
 
-/* highlight.js: keep token colors from the theme, but use our beige <pre> background
-   (override the theme's white fill and its own padding). */
+/* highlight.js: token colours are defined here (theme-aware via CSS variables) instead of a
+   stock hljs stylesheet, so code stays legible in both light and dark. The beige/​warm-dark
+   <pre> fill and padding come from `pre`/`pre code`, not a theme's white block. */
 pre code.hljs {
     padding: 0;
     background: transparent;
 }
+.hljs { color: var(--ink); background: transparent; }
+.hljs-comment,
+.hljs-quote { color: var(--hl-comment); font-style: italic; }
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-literal,
+.hljs-doctag,
+.hljs-section,
+.hljs-meta .hljs-keyword { color: var(--hl-keyword); }
+.hljs-string,
+.hljs-regexp,
+.hljs-addition,
+.hljs-meta .hljs-string { color: var(--hl-string); }
+.hljs-number,
+.hljs-symbol,
+.hljs-bullet,
+.hljs-link { color: var(--hl-number); }
+.hljs-title,
+.hljs-title.function_,
+.hljs-function .hljs-title,
+.hljs-built_in,
+.hljs-name,
+.hljs-attr,
+.hljs-attribute,
+.hljs-selector-id,
+.hljs-selector-class,
+.hljs-selector-attr { color: var(--hl-title); }
+.hljs-type,
+.hljs-title.class_,
+.hljs-class .hljs-title,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-meta,
+.hljs-tag { color: var(--hl-type); }
+.hljs-deletion { color: #c0553f; }
+.hljs-emphasis { font-style: italic; }
+.hljs-strong { font-weight: 700; }
 
 /* Mermaid diagrams render into <pre class="mermaid"> (an <svg> after mermaid.run()).
    Strip the code-block chrome (beige fill, border, padding inherited from `pre`),

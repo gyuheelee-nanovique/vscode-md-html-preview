@@ -18,7 +18,7 @@
  * Both nonce every script and never enable `script-src 'unsafe-inline'`.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MERMAID_JS_SRC = exports.HLJS_CSS_HREF = exports.HLJS_JS_SRC = exports.KATEX_JS_SRC = exports.KATEX_CSS_HREF = void 0;
+exports.MERMAID_JS_SRC = exports.HLJS_JS_SRC = exports.KATEX_JS_SRC = exports.KATEX_CSS_HREF = void 0;
 exports.buildHtmlDocument = buildHtmlDocument;
 const htmlEscape_1 = require("./htmlEscape");
 exports.KATEX_CSS_HREF = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css";
@@ -27,7 +27,7 @@ exports.KATEX_JS_SRC = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.mi
 // when the article actually contains a `language-…` code block.
 const HLJS_VERSION = "11.11.1";
 exports.HLJS_JS_SRC = `https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@${HLJS_VERSION}/build/highlight.min.js`;
-exports.HLJS_CSS_HREF = `https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@${HLJS_VERSION}/build/styles/github.min.css`;
+// Token colours come from preview.css (theme-aware) — no stock hljs theme stylesheet.
 // Mermaid (UMD browser bundle) for `<pre class="mermaid">` diagrams. Loaded only when the
 // article actually contains a mermaid block. jsdelivr is already the allowed CDN_ORIGIN, so
 // no CSP change is needed for the script; mermaid injects its own <style> at runtime, which
@@ -191,7 +191,7 @@ function clientScript(isPreview, nonce, scrollSync) {
   }
 
   // ---- slides ----
-  var deck = null, slides = [];
+  var deck = null, slides = [], slideLines = [];
   function teardownDeck() {
     if (deck && deck.parentNode) deck.parentNode.removeChild(deck);
     deck = null; slides = [];
@@ -232,6 +232,20 @@ function clientScript(isPreview, nonce, scrollSync) {
     }
     document.body.appendChild(deck);
     for (var k = 0; k < slides.length; k++) autoHide(slides[k]);
+    // Map each slide to its source-line range for editor⇄preview slide sync: start = the
+    // slide's smallest data-source-line; heading = its first H1–H6 line (else the start).
+    slideLines = slides.map(function (sec) {
+      var withLine = sec.querySelectorAll('[data-source-line]');
+      var start = Infinity, heading = null;
+      for (var q = 0; q < withLine.length; q++) {
+        var ln = parseInt(withLine[q].getAttribute('data-source-line'), 10);
+        if (isNaN(ln)) continue;
+        if (ln < start) start = ln;
+        if (heading === null && /^H[1-6]$/.test(withLine[q].tagName)) heading = ln;
+      }
+      if (start === Infinity) start = 0;
+      return { start: start, heading: heading === null ? start : heading };
+    });
     if (slideIndex >= slides.length) slideIndex = slides.length - 1;
     if (slideIndex < 0) slideIndex = 0;
     showSlide(slideIndex);
@@ -245,8 +259,25 @@ function clientScript(isPreview, nonce, scrollSync) {
     writeState({ slideIndex: slideIndex });
     if (slides[slideIndex]) slides[slideIndex].scrollTop = 0;
   }
-  function nextSlide() { showSlide(slideIndex + 1); }
-  function prevSlide() { showSlide(slideIndex - 1); }
+  // Preview → editor (slide mode): centre the current slide's heading line in the editor.
+  function postSlideToEditor() {
+    if (!IS_PREVIEW || !SCROLL_SYNC || !slideLines.length) return;
+    var s = slideLines[slideIndex];
+    if (s) post({ type: 'revealLine', line: s.heading });
+  }
+  // User navigation shows the slide AND syncs the editor; editor-driven changes stay silent.
+  function gotoSlide(i) { showSlide(i); postSlideToEditor(); }
+  function nextSlide() { gotoSlide(slideIndex + 1); }
+  function prevSlide() { gotoSlide(slideIndex - 1); }
+  // Editor → preview (slide mode): show the slide whose source range holds the given line.
+  function activateSlideForLine(line) {
+    if (!slideLines.length) return;
+    var idx = 0;
+    for (var i = 0; i < slideLines.length; i++) {
+      if (slideLines[i].start <= line) idx = i; else break;
+    }
+    if (idx !== slideIndex) showSlide(idx);
+  }
 
   // ---- view mode ----
   function applyMode(m) {
@@ -284,8 +315,8 @@ function clientScript(isPreview, nonce, scrollSync) {
     if (mode !== 'slide') return;
     if (e.key === 'ArrowRight' || e.key === 'PageDown') { nextSlide(); e.preventDefault(); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { prevSlide(); e.preventDefault(); }
-    else if (e.key === 'Home') { showSlide(0); e.preventDefault(); }
-    else if (e.key === 'End') { showSlide(slides.length - 1); e.preventDefault(); }
+    else if (e.key === 'Home') { gotoSlide(0); e.preventDefault(); }
+    else if (e.key === 'End') { gotoSlide(slides.length - 1); e.preventDefault(); }
   });
 
   // ---- right-click settings menu ----
@@ -341,51 +372,61 @@ function clientScript(isPreview, nonce, scrollSync) {
   var lineMap = [];
   var suppressPostUntil = 0;
   var rafPending = false;
+  // Each entry is a block's source-line span [s, e] and its pixel span [top, bottom].
   function buildMap() {
     lineMap = [];
     var nodes = document.querySelectorAll('[data-source-line]');
     for (var i = 0; i < nodes.length; i++) {
-      var ln = parseInt(nodes[i].getAttribute('data-source-line'), 10);
-      if (!isNaN(ln)) {
-        lineMap.push({ line: ln, top: nodes[i].getBoundingClientRect().top + window.scrollY });
+      var s = parseInt(nodes[i].getAttribute('data-source-line'), 10);
+      if (isNaN(s)) continue;
+      var e = parseInt(nodes[i].getAttribute('data-source-line-end'), 10);
+      if (isNaN(e) || e < s) e = s;
+      var r = nodes[i].getBoundingClientRect();
+      lineMap.push({ s: s, e: e, top: r.top + window.scrollY, bottom: r.bottom + window.scrollY });
+    }
+    lineMap.sort(function (a, b) { return a.top - b.top; });
+  }
+  // A source line → preview Y. Inside a block: interpolate by the block's own pixel span, so
+  // a tall block (image/Mermaid) or a short one maps accurately. In a gap between blocks
+  // (blank/comment lines that render to nothing): pin to the previous block's bottom — a dead
+  // zone the preview doesn't drift across.
+  function pixelForLine(line) {
+    var prev = null;
+    for (var i = 0; i < lineMap.length; i++) {
+      var b = lineMap[i];
+      if (line < b.s) return prev ? prev.bottom : b.top;
+      if (line <= b.e) {
+        var span = b.e - b.s;
+        var frac = span > 0 ? (line - b.s) / span : 0;
+        return b.top + frac * (b.bottom - b.top);
       }
+      prev = b;
     }
-    lineMap.sort(function (a, b) { return a.line - b.line || a.top - b.top; });
+    return prev ? prev.bottom : 0;
   }
-  function indexAtOrBelow(line) {
-    var idx = 0;
-    for (var i = 0; i < lineMap.length; i++) {
-      if (lineMap[i].line <= line) { idx = i; } else { break; }
-    }
-    return idx;
-  }
+  // Editor -> preview: place that source line at the viewport's vertical CENTRE.
   function scrollToLine(line) {
-    if (!lineMap.length) { return; }
-    var idx = indexAtOrBelow(line);
-    var cur = lineMap[idx];
-    var target = cur.top;
-    var next = lineMap[idx + 1];
-    if (next && next.line > cur.line) {
-      var frac = Math.max(0, Math.min(1, (line - cur.line) / (next.line - cur.line)));
-      target = cur.top + (next.top - cur.top) * frac;
-    }
+    if (!lineMap.length) return;
     suppressPostUntil = Date.now() + 250;
-    window.scrollTo(0, target);
+    window.scrollTo(0, pixelForLine(line) - window.innerHeight / 2);
   }
+  // Preview -> editor: the source line at the viewport's vertical CENTRE. Inside a block:
+  // interpolate by pixel fraction; in a gap: report the previous block's last line.
   function currentLine() {
-    if (!lineMap.length) { return 0; }
-    var y = window.scrollY;
-    var idx = 0;
+    if (!lineMap.length) return 0;
+    var y = window.scrollY + window.innerHeight / 2;
+    var prev = null;
     for (var i = 0; i < lineMap.length; i++) {
-      if (lineMap[i].top <= y + 1) { idx = i; } else { break; }
+      var b = lineMap[i];
+      if (y < b.top) return prev ? prev.e : b.s;
+      if (y <= b.bottom) {
+        var pspan = b.bottom - b.top;
+        var frac = pspan > 0 ? (y - b.top) / pspan : 0;
+        return b.s + frac * (b.e - b.s);
+      }
+      prev = b;
     }
-    var cur = lineMap[idx];
-    var next = lineMap[idx + 1];
-    if (next && next.top > cur.top) {
-      var frac = Math.max(0, Math.min(1, (y - cur.top) / (next.top - cur.top)));
-      return cur.line + (next.line - cur.line) * frac;
-    }
-    return cur.line;
+    return prev ? prev.e : 0;
   }
   function onScroll() {
     writeState({ scrollY: window.scrollY });
@@ -402,7 +443,8 @@ function clientScript(isPreview, nonce, scrollSync) {
   window.addEventListener('message', function (e) {
     var msg = e.data || {};
     if (msg.type === 'scrollToLine') {
-      if (!IS_PREVIEW || !SCROLL_SYNC || mode === 'slide') return;
+      if (!IS_PREVIEW || !SCROLL_SYNC) return;
+      if (mode === 'slide') { activateSlideForLine(msg.line); return; }
       if (!lineMap.length) buildMap();
       scrollToLine(msg.line);
     } else if (msg.type === 'setTheme') {
@@ -460,10 +502,10 @@ function buildHtmlDocument(options) {
     const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
     const katexScript = `<script defer${nonceAttr} src="${exports.KATEX_JS_SRC}"></script>`;
     const renderScript = clientScript(isPreview, nonce ?? "", scrollSync);
-    // Load highlight.js only when a fenced code block with a language is present. The
-    // theme link precedes the inlined <style> so preview.css can override its background.
+    // Load highlight.js only when a fenced code block with a language is present. Token COLORS
+    // come from preview.css (theme-aware, light/dark) — we deliberately do NOT load a stock
+    // hljs theme stylesheet, whose fixed light palette was invisible on the dark background.
     const hasCode = articleHtml.includes('class="language-');
-    const hljsCss = hasCode ? `<link rel="stylesheet" href="${exports.HLJS_CSS_HREF}">\n` : "";
     const hljsScript = hasCode ? `\n<script defer${nonceAttr} src="${exports.HLJS_JS_SRC}"></script>` : "";
     // Load Mermaid only when a `<pre class="mermaid">` diagram is present. `defer` makes it
     // execute before DOMContentLoaded, so window.mermaid is ready when RENDER_BODY runs in
@@ -477,7 +519,7 @@ function buildHtmlDocument(options) {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${cspMeta}<title>${(0, htmlEscape_1.escapeHtml)(title)}</title>
 <link rel="stylesheet" href="${exports.KATEX_CSS_HREF}">
-${hljsCss}<style>
+<style>
 ${css}
 </style>
 ${katexScript}${hljsScript}${mermaidScript}
