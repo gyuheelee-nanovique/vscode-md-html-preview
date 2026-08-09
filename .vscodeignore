@@ -6,3 +6,8 @@ node_modules/**
 tsconfig.json
 **/*.map
 **/*.ts
+
+# Distribution tooling lives in the repo, not inside the shipped extension (and packing
+# the previous .vsix into the new one would nest a copy of every past build).
+dist/**
+DISTRIBUTION.md

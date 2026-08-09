@@ -1,8 +1,12 @@
 node_modules/
 *.vsix
+!dist/vscode-md-html-preview.vsix
 *.log
 .DS_Store
 
-# NOTE: out/ is intentionally TRACKED (committed) so consumer machines can run the
-# extension by cloning alone — no Node/build step required. Build on the dev machine
-# with `npm run compile` (or `dist/release.sh`) before committing.
+# NOTE: dist/vscode-md-html-preview.vsix is intentionally TRACKED — it is what consumer
+# machines install (`code --install-extension`), so they need only git + VS Code, no Node
+# or build step. Rebuild it on the dev machine with `dist/release.sh` (or dist/release.ps1).
+#
+# out/ is also tracked, which predates the .vsix distribution and is no longer required —
+# the .vsix carries its own compiled copy. Kept for now so old checkouts keep working.

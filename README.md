@@ -75,11 +75,16 @@ npm run compile  # tsc -> out/
 Then press **F5** in VS Code (with this folder open) to launch an Extension
 Development Host, open a Markdown file, and run **Markdown HTML Preview: Open**.
 
-To package a `.vsix` (requires `@vscode/vsce`):
+To package and install the real artifact (requires `@vscode/vsce`):
 
 ```bash
-npx @vscode/vsce package
+npx @vscode/vsce package --out dist/vscode-md-html-preview.vsix
+code --install-extension dist/vscode-md-html-preview.vsix --force
 ```
+
+Copying this folder into `~/.vscode/extensions/` does **not** work on current VS Code —
+extensions must be installed from a `.vsix` through the CLI. See
+[DISTRIBUTION.md](DISTRIBUTION.md) for the release flow and multi-machine auto-update.
 
 ## Notes
 

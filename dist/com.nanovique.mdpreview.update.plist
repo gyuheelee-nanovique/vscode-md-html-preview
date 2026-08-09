@@ -2,13 +2,17 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   macOS auto-update LaunchAgent for CONSUMER machines.
-  Pulls the latest extension every 6 hours and at login by re-running install.sh.
+  Every 6 hours and at login, re-runs install.sh: pull the repo cache, and reinstall the
+  packaged .vsix through the VS Code CLI when the version changed.
 
   Install:
-    cp dist/com.nanovique.mdpreview.update.plist ~/Library/LaunchAgents/
+    cp "${XDG_DATA_HOME:-$HOME/.local/share}/vscode-md-html-preview/dist/com.nanovique.mdpreview.update.plist" \
+       ~/Library/LaunchAgents/
     launchctl load ~/Library/LaunchAgents/com.nanovique.mdpreview.update.plist
   Remove:
     launchctl unload ~/Library/LaunchAgents/com.nanovique.mdpreview.update.plist
+
+  If the checkout lives somewhere else, set MDPREVIEW_HOME in the command below to match.
 -->
 <plist version="1.0">
 <dict>
@@ -18,7 +22,7 @@
   <array>
     <string>/bin/bash</string>
     <string>-lc</string>
-    <string>"$HOME/.vscode/extensions/nanovique.vscode-md-html-preview/dist/install.sh"</string>
+    <string>"${MDPREVIEW_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/vscode-md-html-preview}/dist/install.sh"</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
