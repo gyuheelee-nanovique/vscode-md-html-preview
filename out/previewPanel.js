@@ -205,6 +205,7 @@ class PreviewManager {
         const baseDir = uri.scheme === "file" ? path.dirname(uri.fsPath) : undefined;
         const result = (0, markdownRenderer_1.markdownToArticleHtml)(doc.getText(), {
             keepLinks: !cfg.plainCitations,
+            autolinkUrls: cfg.autolinkUrls,
             removeTopImages: cfg.removeTopImages,
             openReferences: true, // keep references open for print
             resolveImage: this.makeResolveImage(baseDir, undefined, true),
@@ -316,6 +317,7 @@ class PreviewManager {
             openReferences: cfg.get("openReferences", true),
             removeTopImages: Math.max(0, cfg.get("removeTopImages", 0)),
             plainCitations: cfg.get("plainCitations", true),
+            autolinkUrls: cfg.get("autolinkUrls", true),
             debounceMs: Math.max(0, cfg.get("debounceMs", 200)),
             scrollSync: cfg.get("scrollSync", true),
             defaultTheme: cfg.get("defaultTheme", "dark") === "light" ? "light" : "dark",
@@ -469,6 +471,7 @@ class PreviewManager {
         const webview = this.panel.webview;
         const options = {
             keepLinks: !cfg.plainCitations,
+            autolinkUrls: cfg.autolinkUrls,
             removeTopImages: cfg.removeTopImages,
             openReferences: cfg.openReferences,
             resolveImage: this.makeResolveImage(baseDir, webview, cfg.embedImages),

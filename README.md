@@ -29,6 +29,9 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   liposome "simulation" table are rendered with horizontal scrolling for wide tables.
 - **Plain citations** — `[text](url)` links are stripped to plain text by default to
   match the paper pipeline (toggle with `mdHtmlPreview.plainCitations`).
+- **Clickable web addresses** — bare URLs (`https://…`, `<https://…>`) become clickable
+  links in the live preview, the saved standalone HTML, and the printed PDF, even while
+  citations stay plain (toggle with `mdHtmlPreview.autolinkUrls`).
 - **Scroll sync** — the editor and the preview stay aligned in **both directions**
   (scroll either side, the other follows), mapped via `data-source-line` markers.
   Toggle with `mdHtmlPreview.scrollSync`.
@@ -69,6 +72,7 @@ offers `Save Standalone HTML`.
 | `mdHtmlPreview.openReferences` | `true` | Open the references `<details>` by default. |
 | `mdHtmlPreview.removeTopImages` | `0` | Drop the first N images (publisher logos / decorative headers). |
 | `mdHtmlPreview.plainCitations` | `true` | Render Markdown links as plain text (no `<a>`). |
+| `mdHtmlPreview.autolinkUrls` | `true` | Turn bare web addresses into clickable links (preview / HTML / PDF). |
 | `mdHtmlPreview.debounceMs` | `200` | Debounce delay between an edit and the refresh. |
 | `mdHtmlPreview.scrollSync` | `true` | Keep editor and preview scroll positions in sync (both directions). |
 | `mdHtmlPreview.defaultTheme` | `dark` | Theme a freshly opened preview starts in (printing is always light). |

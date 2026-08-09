@@ -56,6 +56,72 @@ const HTML_BLOCK_RE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*)?\/?>/;
 const INLINE_HTML_RE = /&lt;(\/?(?:br|sub|sup|u|s|mark|small|kbd|del|ins|wbr|abbr|cite|q)\s*\/?)&gt;/gi;
 // A source line forcing a hard line break (`<br>`): trailing 2+ spaces or a backslash.
 const HARD_BREAK_RE = /(?: {2,}|\\)\s*$/;
+// Bare web address in already-HTML-escaped text. `\x00` is excluded so a URL can never
+// swallow a parked code/math placeholder; whitespace ends the URL as usual. `\b` keeps
+// the match from starting inside a longer word (e.g. `xhttps://`).
+const AUTOLINK_BARE_RE = /\bhttps?:\/\/[^\s\x00]+/gi;
+// Markdown angle-bracket autolink `<https://…>`, seen post-escape as `&lt;…&gt;`.
+const AUTOLINK_ANGLE_RE = /&lt;(https?:\/\/[^\s\x00]+?)&gt;/gi;
+// Punctuation that ends a sentence around a URL rather than belonging to it.
+const URL_TRAIL_CHARS = ".,;:!?'\"”’»";
+const URL_CLOSERS = { ")": "(", "]": "[", "}": "{" };
+// A complete trailing entity (`…&amp;`) — its closing `;` must not be trimmed away.
+const ENTITY_TAIL_RE = /&(?:[a-zA-Z][a-zA-Z0-9]*|#\d+|#[xX][0-9a-fA-F]+);$/;
+/**
+ * Split a raw URL match into the URL proper and trailing text that only borders it:
+ * escaped `<`/`>` delimiters, sentence punctuation (`(see https://x.org).`), and a
+ * closing bracket with no matching opener inside the URL — while a Wikipedia-style
+ * `…/Foo_(bar)` keeps its balanced `)`.
+ */
+function splitUrlTrail(match) {
+    let url = match;
+    let trail = "";
+    const delim = url.search(/&(?:lt|gt);/);
+    if (delim >= 0) {
+        trail = url.slice(delim);
+        url = url.slice(0, delim);
+    }
+    for (;;) {
+        const ch = url.charAt(url.length - 1);
+        if (URL_TRAIL_CHARS.includes(ch)) {
+            if (ch === ";" && ENTITY_TAIL_RE.test(url)) {
+                break; // `…&amp;` — a literal `&` ends the URL; keep its entity intact
+            }
+        }
+        else if (URL_CLOSERS[ch]) {
+            const open = URL_CLOSERS[ch];
+            const opens = url.split(open).length - 1;
+            const closes = url.split(ch).length - 1;
+            if (closes <= opens) {
+                break; // balanced by an opener inside the URL — part of the path
+            }
+        }
+        else {
+            break;
+        }
+        url = url.slice(0, -1);
+        trail = ch + trail;
+    }
+    return [url, trail];
+}
+/**
+ * Wrap bare web addresses in the escaped text with `<a>` and park the whole anchor via
+ * `park` so the later `**bold**` pass cannot mangle it. The text is already entity-escaped
+ * (`&amp;` is a literal `&`), which is exactly what an href attribute needs — only quotes
+ * still have to be neutralized (they pass through `escapeHtml`, which is quote-less).
+ */
+function autolinkEscapedUrls(escaped, park) {
+    const toAnchor = (url) => {
+        const href = url.replace(/"/g, "&quot;").replace(/'/g, "&#x27;");
+        return `<a href="${href}" rel="noreferrer">${url}</a>`;
+    };
+    let out = escaped.replace(AUTOLINK_ANGLE_RE, (_m, url) => park(toAnchor(url)));
+    out = out.replace(AUTOLINK_BARE_RE, (match) => {
+        const [url, trail] = splitUrlTrail(match);
+        return url ? park(toAnchor(url)) + trail : match;
+    });
+    return out;
+}
 /**
  * Inline-format an already-HTML-escaped segment.
  *  - `**bold**` → `<strong>` (rendered with the Freesentation bold weight). Safe because
@@ -65,18 +131,35 @@ const HARD_BREAK_RE = /(?: {2,}|\\)\s*$/;
  *    so converting them corrupts real documents.
  *  - Markdown links become `<a>` only when `keepLinks` is enabled; the href is
  *    attribute-escaped and scheme-validated so a crafted link cannot inject attributes.
+ *  - Bare web addresses become `<a>` when `autolinkUrls` is enabled, in every mode
+ *    (live preview, standalone export, print/PDF).
  */
-function applyInlineFormatting(escaped, keepLinks) {
+function applyInlineFormatting(escaped, keepLinks, autolinkUrls) {
     let out = escaped;
+    // Finished anchors are parked as placeholders so the autolink pass cannot re-link a URL
+    // inside an existing href/label and the bold pass cannot split a tag.
+    const parked = [];
+    const park = (html) => `\x00a${parked.push(html) - 1}\x00`;
     if (keepLinks) {
         out = out.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_m, label, href) => {
             if (!SAFE_HREF_RE.test(href)) {
                 return label;
             }
-            return `<a href="${(0, htmlEscape_1.escapeAttr)(href)}" rel="noreferrer">${label}</a>`;
+            // `href` comes from text that is already entity-escaped, so only quotes need
+            // escaping here — `escapeAttr` would double-escape `&` into `&amp;amp;`.
+            const open = `<a href="${href.replace(/"/g, "&quot;").replace(/'/g, "&#x27;")}" rel="noreferrer">`;
+            // Tags are parked separately so `**bold**` inside the label still renders; a label
+            // that itself contains a URL is parked whole so autolink cannot nest an anchor in it.
+            return /https?:\/\//i.test(label)
+                ? park(open + label + "</a>")
+                : park(open) + label + park("</a>");
         });
     }
+    if (autolinkUrls) {
+        out = autolinkEscapedUrls(out, park);
+    }
     out = out.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    out = out.replace(/\x00a(\d+)\x00/g, (_m, idx) => parked[Number(idx)] ?? "");
     return out;
 }
 /**
@@ -84,7 +167,7 @@ function applyInlineFormatting(escaped, keepLinks) {
  * code, normalizes `$`...`$`, applies textual math fixes, then walks `$...$` spans
  * emitting `<span class="math-tex">` for KaTeX while escaping the text in between.
  */
-function inline(rawText, keepLinks) {
+function inline(rawText, keepLinks, autolinkUrls = true) {
     let text = (0, htmlEscape_1.unescapeHtml)(rawText);
     text = (0, citations_1.stripMarkdownLinks)(text, keepLinks);
     // $`expr`$  ->  $expr$
@@ -114,7 +197,7 @@ function inline(rawText, keepLinks) {
         const idx = mathSpans.push(html) - 1;
         return `\x00m${idx}\x00`;
     });
-    let out = applyInlineFormatting((0, htmlEscape_1.escapeHtml)(text), keepLinks);
+    let out = applyInlineFormatting((0, htmlEscape_1.escapeHtml)(text), keepLinks, autolinkUrls);
     // Restore placeholders. Math HTML is already built and escaped; code is escaped here.
     out = out.replace(/\x00m(\d+)\x00/g, (_m, idx) => mathSpans[Number(idx)] ?? "");
     out = out.replace(/\x00c(\d+)\x00/g, (_m, idx) => {
@@ -303,7 +386,8 @@ function commentLineMask(md) {
 function markdownToArticleHtml(md, options) {
     const { keepLinks, removeTopImages, openReferences, resolveImage } = options;
     const withLines = options.sourceLines !== false;
-    const renderInline = (text) => inline(text, keepLinks);
+    const autolinkUrls = options.autolinkUrls !== false;
+    const renderInline = (text) => inline(text, keepLinks, autolinkUrls);
     const lines = stripHtmlComments(md).split(/\r\n|\r|\n/);
     const blocks = [];
     let i = 0;

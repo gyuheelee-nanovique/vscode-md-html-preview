@@ -36,6 +36,7 @@ interface PreviewConfig {
   openReferences: boolean;
   removeTopImages: number;
   plainCitations: boolean;
+  autolinkUrls: boolean;
   debounceMs: number;
   scrollSync: boolean;
   defaultTheme: "light" | "dark";
@@ -213,6 +214,7 @@ export class PreviewManager {
     const baseDir = uri.scheme === "file" ? path.dirname(uri.fsPath) : undefined;
     const result = markdownToArticleHtml(doc.getText(), {
       keepLinks: !cfg.plainCitations,
+      autolinkUrls: cfg.autolinkUrls,
       removeTopImages: cfg.removeTopImages,
       openReferences: true, // keep references open for print
       resolveImage: this.makeResolveImage(baseDir, undefined, true),
@@ -338,6 +340,7 @@ export class PreviewManager {
       openReferences: cfg.get<boolean>("openReferences", true),
       removeTopImages: Math.max(0, cfg.get<number>("removeTopImages", 0)),
       plainCitations: cfg.get<boolean>("plainCitations", true),
+      autolinkUrls: cfg.get<boolean>("autolinkUrls", true),
       debounceMs: Math.max(0, cfg.get<number>("debounceMs", 200)),
       scrollSync: cfg.get<boolean>("scrollSync", true),
       defaultTheme: cfg.get<string>("defaultTheme", "dark") === "light" ? "light" : "dark",
@@ -516,6 +519,7 @@ export class PreviewManager {
 
     const options: RenderOptions = {
       keepLinks: !cfg.plainCitations,
+      autolinkUrls: cfg.autolinkUrls,
       removeTopImages: cfg.removeTopImages,
       openReferences: cfg.openReferences,
       resolveImage: this.makeResolveImage(baseDir, webview, cfg.embedImages),
