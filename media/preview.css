@@ -187,7 +187,16 @@ th, td {
     border-bottom: 1px solid var(--hair);
     text-align: left;
     vertical-align: top;
-    overflow-wrap: anywhere;
+    /* `break-word`, NOT `anywhere`. Both break a word that would overflow, but `anywhere`
+       also counts every character as a break opportunity when the browser computes a
+       cell's MIN-CONTENT width — so in an auto-layout table a narrow column next to long
+       prose collapses to about one character, and a timestamp like `0:23` stacks as
+       0 / :2 / 3. `break-word` leaves min-content at the longest real token, so such a
+       column keeps its natural width while long prose still wraps instead of overflowing.
+       The trade-off: one very long unbreakable token (a bare URL) now widens the table
+       rather than being chopped mid-word, so such a table scrolls in .table-scroll — the
+       same thing GitHub does, and far rarer than the collapsed-column case above. */
+    overflow-wrap: break-word;
 }
 
 th {

@@ -2,7 +2,7 @@
   "name": "vscode-md-html-preview",
   "displayName": "Markdown HTML Preview (Paper)",
   "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, Mermaid diagrams, image embedding, foldable references, docling tables, and A4 print CSS. Saves a fully offline standalone HTML file — every asset embedded, no network or dependencies needed to open it.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "nanovique",
   "license": "MIT",
   "repository": {
