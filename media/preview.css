@@ -11,19 +11,12 @@
  * light, on paper, regardless of the on-screen theme).
  */
 
-@font-face {
-    font-family: 'Presentation';
-    src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2404@1.0/Freesentation-4Regular.woff2') format('woff2');
-    font-weight: 400;
-    font-display: swap;
-}
-
-@font-face {
-    font-family: 'Presentation';
-    src: url('https://cdn.jsdelivr.net/gh/projectnoonnu/2404@1.0/Freesentation-7Bold.woff2') format('woff2');
-    font-weight: 700;
-    font-display: swap;
-}
+/*
+ * The `@font-face` rules for the 'Presentation' family are NOT here: the page needs a
+ * different URL for each target (a webview resource URI in the preview, a base64 data URI
+ * in a standalone export that must open with no network). src/assets.ts generates them and
+ * htmlTemplate.ts injects them ahead of this file.
+ */
 
 :root {
     color-scheme: light;
@@ -376,6 +369,13 @@ body.scrolling::-webkit-scrollbar-thumb:hover { background: var(--ink); }
 .ui-menu-item[aria-checked="true"]::before {
     border-color: var(--accent);
     background: radial-gradient(circle, var(--accent) 0 3.5px, transparent 4.5px);
+}
+
+/* Command rows (e.g. "HTML로 저장") are actions, not choices: no radio bullet, but keep
+   its box so their labels stay on the same left edge as the rows above. */
+.ui-menu-item[data-act]::before {
+    border-color: transparent;
+    background: transparent;
 }
 
 /* ------------------------------------------------------------------ *

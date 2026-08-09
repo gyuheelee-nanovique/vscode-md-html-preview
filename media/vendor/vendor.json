@@ -1,0 +1,33 @@
+{
+  "katex": "0.16.11",
+  "highlightjs": "11.11.1",
+  "mermaid": "11",
+  "files": {
+    "katex.min.css": 21201,
+    "fonts/KaTeX_AMS-Regular.woff2": 28076,
+    "fonts/KaTeX_Caligraphic-Bold.woff2": 6912,
+    "fonts/KaTeX_Caligraphic-Regular.woff2": 6908,
+    "fonts/KaTeX_Fraktur-Bold.woff2": 11348,
+    "fonts/KaTeX_Fraktur-Regular.woff2": 11316,
+    "fonts/KaTeX_Main-Bold.woff2": 25324,
+    "fonts/KaTeX_Main-BoldItalic.woff2": 16780,
+    "fonts/KaTeX_Main-Italic.woff2": 16988,
+    "fonts/KaTeX_Main-Regular.woff2": 26272,
+    "fonts/KaTeX_Math-BoldItalic.woff2": 16400,
+    "fonts/KaTeX_Math-Italic.woff2": 16440,
+    "fonts/KaTeX_SansSerif-Bold.woff2": 12216,
+    "fonts/KaTeX_SansSerif-Italic.woff2": 12028,
+    "fonts/KaTeX_SansSerif-Regular.woff2": 10344,
+    "fonts/KaTeX_Script-Regular.woff2": 9644,
+    "fonts/KaTeX_Size1-Regular.woff2": 5468,
+    "fonts/KaTeX_Size2-Regular.woff2": 5208,
+    "fonts/KaTeX_Size3-Regular.woff2": 3624,
+    "fonts/KaTeX_Size4-Regular.woff2": 4928,
+    "fonts/KaTeX_Typewriter-Regular.woff2": 13568,
+    "katex.min.js": 275414,
+    "highlight.min.js": 127496,
+    "mermaid.min.js": 3566058,
+    "Freesentation-4Regular.woff2": 250812,
+    "Freesentation-7Bold.woff2": 257004
+  }
+}

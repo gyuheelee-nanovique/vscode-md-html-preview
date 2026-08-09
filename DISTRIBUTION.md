@@ -104,9 +104,15 @@ Force a reinstall regardless of version with `install.sh --force` / `install.ps1
 4. Consumer machines auto-pull on their schedule; tell users to reload VS Code, or they
    pick it up on the next restart. To update immediately, run `dist/install.sh` there.
 
-`release.sh` runs `npm install` (first time only) and `npx @vscode/vsce package`, which
-triggers `npm run compile` via the `vscode:prepublish` hook — so the `.vsix` always
-contains freshly compiled output.
+`release.sh` runs `npm install` (first time only), refetches `media/vendor/` if a checkout
+is missing it, and calls `npx @vscode/vsce package`, which triggers `npm run compile` via
+the `vscode:prepublish` hook — so the `.vsix` always contains freshly compiled output.
+
+`media/vendor/` holds the third-party assets a saved HTML file inlines (KaTeX + its fonts,
+highlight.js, Mermaid, the webfont — ~4.5 MB, committed). Refresh them after bumping a
+version in `dist/fetch-vendor.mjs` with `node dist/fetch-vendor.mjs --force`. They are the
+reason the `.vsix` is ~2 MB rather than ~50 KB, and therefore why each release commit adds
+roughly that much to the repo.
 
 For day-to-day work, don't install the extension on the dev machine at all: press **F5**
 in this repo to launch an Extension Development Host with the working copy loaded, which

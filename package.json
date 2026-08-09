@@ -1,8 +1,8 @@
 {
   "name": "vscode-md-html-preview",
   "displayName": "Markdown HTML Preview (Paper)",
-  "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, Mermaid diagrams, image embedding, foldable references, docling tables, and A4 print CSS. Mirrors the standalone HTML produced by tools/pdf_to_html.py.",
-  "version": "0.3.4",
+  "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, Mermaid diagrams, image embedding, foldable references, docling tables, and A4 print CSS. Saves a fully offline standalone HTML file — every asset embedded, no network or dependencies needed to open it.",
+  "version": "0.4.0",
   "publisher": "nanovique",
   "license": "MIT",
   "repository": {
@@ -44,7 +44,7 @@
       },
       {
         "command": "mdHtmlPreview.exportHtml",
-        "title": "Export Standalone HTML",
+        "title": "Save Standalone HTML",
         "category": "Markdown HTML Preview",
         "icon": "$(save-as)"
       },
@@ -75,6 +75,13 @@
           "group": "navigation"
         }
       ],
+      "editor/context": [
+        {
+          "command": "mdHtmlPreview.exportHtml",
+          "when": "editorLangId == markdown",
+          "group": "z_commands@1"
+        }
+      ],
       "commandPalette": [
         {
           "command": "mdHtmlPreview.open",
@@ -82,7 +89,7 @@
         },
         {
           "command": "mdHtmlPreview.exportHtml",
-          "when": "editorLangId == markdown"
+          "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
         },
         {
           "command": "mdHtmlPreview.print",
@@ -168,6 +175,11 @@
           ],
           "default": "dark",
           "markdownDescription": "Theme a freshly opened preview starts in. The right-click menu (or `Toggle Dark / Light Theme`) overrides it for the session. **Printing / Save as PDF always uses the light theme** regardless of this setting."
+        },
+        "mdHtmlPreview.offlineExport": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Embed every asset — the webfont, KaTeX and its fonts, highlight.js, Mermaid — into the saved / printed HTML, so the file opens with **no network connection and no dependencies**. Turn off to link them from jsDelivr instead, which makes the file ~1.5 MB smaller (~5 MB smaller with Mermaid diagrams) but requires a connection to open."
         },
         "mdHtmlPreview.defaultMode": {
           "type": "string",

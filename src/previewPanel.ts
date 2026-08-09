@@ -18,6 +18,7 @@ import { spawn } from "child_process";
 
 import { markdownToArticleHtml, commentLineMask, RenderOptions, RenderResult } from "./markdownRenderer";
 import { buildHtmlDocument } from "./htmlTemplate";
+import { AssetProvider } from "./assets";
 
 const MIME_BY_EXT: Record<string, string> = {
   ".png": "image/png",
@@ -39,6 +40,7 @@ interface PreviewConfig {
   scrollSync: boolean;
   defaultTheme: "light" | "dark";
   defaultMode: "document" | "slide";
+  offlineExport: boolean;
 }
 
 function guessMime(file: string): string {
@@ -87,9 +89,11 @@ export class PreviewManager {
   /** Cached comment-line mask, keyed by the document version it was computed from. */
   private commentMaskCache: { version: number; mask: boolean[] } | undefined;
   private readonly cssText: string;
+  private readonly assets: AssetProvider;
 
   constructor(private readonly context: vscode.ExtensionContext) {
     this.cssText = this.loadCss();
+    this.assets = new AssetProvider(context.extensionPath);
 
     context.subscriptions.push(
       vscode.workspace.onDidChangeTextDocument((e) => {
@@ -153,8 +157,16 @@ export class PreviewManager {
     return this.commentMaskCache.mask;
   }
 
-  /** Preview → editor: reveal the reported source line CENTERED in the source editor. */
+  /** Messages from the Webview: scroll sync, plus the right-click menu's export commands. */
   private onPreviewMessage(message: { type?: string; line?: number }): void {
+    if (message.type === "exportHtml") {
+      void this.exportHtml();
+      return;
+    }
+    if (message.type === "print") {
+      void this.print();
+      return;
+    }
     if (!this.sourceUri || message.type !== "revealLine" || typeof message.line !== "number") {
       return;
     }
@@ -213,6 +225,7 @@ export class PreviewManager {
       nonce: getNonce(),
       theme: forPrint ? "light" : cfg.defaultTheme,
       mode: forPrint ? "document" : cfg.defaultMode,
+      assets: this.assets.exportAssets(cfg.offlineExport),
     });
     return { html, result };
   }
@@ -329,6 +342,7 @@ export class PreviewManager {
       scrollSync: cfg.get<boolean>("scrollSync", true),
       defaultTheme: cfg.get<string>("defaultTheme", "dark") === "light" ? "light" : "dark",
       defaultMode: cfg.get<string>("defaultMode", "document") === "slide" ? "slide" : "document",
+      offlineExport: cfg.get<boolean>("offlineExport", true),
     };
   }
 
@@ -517,38 +531,54 @@ export class PreviewManager {
       scrollSync: cfg.scrollSync,
       theme: cfg.defaultTheme,
       mode: cfg.defaultMode,
+      assets: this.assets.previewAssets(webview),
     });
 
     webview.html = html;
     this.panel.title = this.titleFor(this.sourceUri);
   }
 
-  /** Build a standalone HTML file (images embedded as base64) next to the source. */
-  async exportHtml(editor: vscode.TextEditor): Promise<void> {
-    const doc = editor.document;
-    const uri = doc.uri;
+  /**
+   * Save the document as a single standalone HTML file, chosen through the OS save dialog.
+   *
+   * With `offlineExport` on (the default) the file embeds everything it needs — images as
+   * base64, the webfont, KaTeX and its fonts, highlight.js and Mermaid as inline script —
+   * so it opens by double-click on any machine, with no network, no extension and no
+   * sibling files. Callable from the command palette, the editor context menu, and the
+   * preview's own right-click menu, so it resolves its target the same way `print` does.
+   */
+  async exportHtml(): Promise<void> {
+    const uri = this.commandTargetUri();
+    if (!uri) {
+      vscode.window.showWarningMessage("먼저 Markdown 문서를 열거나 미리보기를 여세요.");
+      return;
+    }
     if (uri.scheme !== "file") {
       vscode.window.showWarningMessage("저장된 파일에서만 HTML로 내보낼 수 있습니다.");
       return;
     }
-
-    const { html, result } = this.buildStandaloneHtml(uri, doc);
-    const base = path.basename(uri.fsPath).replace(/\.(md|markdown)$/i, "");
-    const outPath = path.join(path.dirname(uri.fsPath), `${base}.html`);
-
-    if (fs.existsSync(outPath)) {
-      const choice = await vscode.window.showWarningMessage(
-        `${path.basename(outPath)} 파일이 이미 있습니다. 덮어쓸까요?`,
-        { modal: true },
-        "덮어쓰기"
-      );
-      if (choice !== "덮어쓰기") {
-        return;
-      }
+    let doc: vscode.TextDocument;
+    try {
+      doc = await vscode.workspace.openTextDocument(uri);
+    } catch {
+      vscode.window.showWarningMessage("문서를 열 수 없습니다.");
+      return;
     }
 
+    const base = path.basename(uri.fsPath).replace(/\.(md|markdown)$/i, "");
+    // The save dialog also handles the overwrite confirmation, natively and per-platform.
+    const target = await vscode.window.showSaveDialog({
+      defaultUri: vscode.Uri.file(path.join(path.dirname(uri.fsPath), `${base}.html`)),
+      filters: { HTML: ["html", "htm"] },
+      saveLabel: "HTML로 저장",
+    });
+    if (!target) {
+      return;
+    }
+
+    const { html, result } = this.buildStandaloneHtml(uri, doc);
     try {
-      fs.writeFileSync(outPath, html, "utf8");
+      fs.writeFileSync(target.fsPath, html, "utf8");
     } catch (err) {
       vscode.window.showErrorMessage(`HTML 내보내기 실패: ${err instanceof Error ? err.message : String(err)}`);
       return;
@@ -558,12 +588,16 @@ export class PreviewManager {
     if (result.missingImages.length > 0) {
       notes.push(`누락 ${result.missingImages.length}개`);
     }
+    notes.push(`${(Buffer.byteLength(html, "utf8") / 1024 / 1024).toFixed(1)} MB`);
+    if (!this.readConfig(uri).offlineExport || !this.assets.offlineCapable) {
+      notes.push("CDN 필요");
+    }
     const open = await vscode.window.showInformationMessage(
-      `HTML 내보내기 완료: ${path.basename(outPath)} (${notes.join(", ")})`,
+      `HTML 저장 완료: ${path.basename(target.fsPath)} (${notes.join(", ")})`,
       "열기"
     );
     if (open === "열기") {
-      void vscode.commands.executeCommand("vscode.open", vscode.Uri.file(outPath));
+      this.openInBrowser(target.fsPath);
     }
   }
 }

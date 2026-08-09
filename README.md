@@ -39,8 +39,12 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   browser hand-off is the reliable path.)
 - **A4 print CSS** — `@page { size: A4 }`, repeating table headers, and break-avoid
   rules, so browser print / PDF looks right.
-- **Standalone export** — `Markdown HTML Preview: Export Standalone HTML` writes
-  `<name>.html` next to the source with all local images embedded as base64.
+- **Offline standalone HTML** — `Markdown HTML Preview: Save Standalone HTML` asks where
+  to save and writes a **single self-contained file**: images, the webfont, KaTeX and its
+  fonts, highlight.js and Mermaid are all embedded. It opens by double-click on any
+  machine — no network, no extension, no sibling files. Turn off
+  `mdHtmlPreview.offlineExport` to link those assets from a CDN instead and keep the file
+  small.
 
 ## Commands
 
@@ -48,10 +52,14 @@ as the standalone HTML exporter, so what you see while editing is what the expor
 | --- | --- | --- |
 | Markdown HTML Preview: Open | `mdHtmlPreview.open` | `Ctrl/Cmd+Shift+Alt+V` |
 | Markdown HTML Preview: Print / Save as PDF | `mdHtmlPreview.print` | `Ctrl/Cmd+'` |
-| Markdown HTML Preview: Export Standalone HTML | `mdHtmlPreview.exportHtml` | — |
+| Markdown HTML Preview: Save Standalone HTML | `mdHtmlPreview.exportHtml` | — |
 
 There is also an `Open` button in the editor title bar for Markdown files. The print
 shortcut works while either the Markdown editor or the preview panel is focused.
+
+**Right-click** inside the preview for theme (light / dark), view mode (document / slide),
+`HTML로 저장…`, and `인쇄 / PDF로 저장…`. Right-clicking in a Markdown **editor** also
+offers `Save Standalone HTML`.
 
 ## Settings
 
@@ -63,13 +71,17 @@ shortcut works while either the Markdown editor or the preview panel is focused.
 | `mdHtmlPreview.plainCitations` | `true` | Render Markdown links as plain text (no `<a>`). |
 | `mdHtmlPreview.debounceMs` | `200` | Debounce delay between an edit and the refresh. |
 | `mdHtmlPreview.scrollSync` | `true` | Keep editor and preview scroll positions in sync (both directions). |
+| `mdHtmlPreview.defaultTheme` | `dark` | Theme a freshly opened preview starts in (printing is always light). |
+| `mdHtmlPreview.defaultMode` | `document` | View a freshly opened preview starts in (`slide` paginates on `---`). |
+| `mdHtmlPreview.offlineExport` | `true` | Embed every asset in the saved / printed HTML so it opens with no network. |
 
 ## Build / run
 
 ```bash
 cd vscode-md-html-preview
-npm install      # installs TypeScript + type definitions (dev only)
-npm run compile  # tsc -> out/
+npm install                    # TypeScript + type definitions (dev only)
+node dist/fetch-vendor.mjs     # third-party assets -> media/vendor/ (committed; run once)
+npm run compile                # tsc -> out/
 ```
 
 Then press **F5** in VS Code (with this folder open) to launch an Extension
@@ -88,11 +100,16 @@ extensions must be installed from a `.vsix` through the CLI. See
 
 ## Notes
 
-- The Webview Content-Security-Policy allows `https://cdn.jsdelivr.net` for KaTeX and
-  the Freesentation font, the Webview's own resource origin for local images, plus
-  `data:`/`https:` images. Scripts run only with a per-render nonce.
-- KaTeX and the font load from CDN, so the live preview needs network access. The
-  exported standalone HTML also references those CDNs; bundling them locally is a
-  possible future enhancement (see the development plan).
+- **Nothing loads from the network.** KaTeX (+ its 20 woff2 faces), highlight.js,
+  Mermaid and the Freesentation webfont are vendored under `media/vendor/` by
+  `dist/fetch-vendor.mjs` and ship inside the extension. The preview links them as
+  Webview resource URIs (cheap — it re-renders on every keystroke); a saved file inlines
+  them, which is what makes it portable. If `media/vendor/` is absent, both quietly fall
+  back to jsDelivr and behave as before.
+- The Content-Security-Policy grants `default-src 'none'` and names the CDN origin only
+  when an asset actually came from there. Scripts run only with a per-render nonce;
+  `script-src 'unsafe-inline'` is never enabled.
+- A saved file is ~1.5 MB, or ~5 MB when it contains Mermaid diagrams (the Mermaid
+  bundle alone is 3.5 MB and is only included when a diagram is present).
 - This extension has **no runtime npm dependencies** — the renderer is self-contained
   TypeScript. Only build-time dev dependencies (`typescript`, `@types/*`) are needed.

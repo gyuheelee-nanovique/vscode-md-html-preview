@@ -10,6 +10,9 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 [ -d node_modules ] || npm install --no-audit --no-fund
+# The vendored KaTeX / highlight.js / Mermaid / webfont files are committed; refetch them
+# only if a checkout is missing them, otherwise the export silently reverts to CDN links.
+[ -f media/vendor/mermaid.min.js ] || node dist/fetch-vendor.mjs
 
 # `vsce package` runs the vscode:prepublish script, i.e. `npm run compile`.
 npx --yes @vscode/vsce package --out dist/vscode-md-html-preview.vsix

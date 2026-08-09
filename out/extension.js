@@ -58,14 +58,11 @@ function activate(context) {
             return;
         }
         manager.open(editor);
-    }), vscode.commands.registerCommand("mdHtmlPreview.exportHtml", async () => {
-        const editor = activeMarkdownEditor();
-        if (!editor) {
-            vscode.window.showWarningMessage("먼저 Markdown 문서를 여세요.");
-            return;
-        }
-        await manager.exportHtml(editor);
-    }), vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()), vscode.commands.registerCommand("mdHtmlPreview.toggleSlideMode", () => manager.toggleSlideMode()), vscode.commands.registerCommand("mdHtmlPreview.toggleTheme", () => manager.toggleTheme()));
+    }), 
+    // No active-editor guard here: like `print`, the command also fires from the preview's
+    // own right-click menu, where focus is in the Webview and there is no active editor —
+    // the manager falls back to the document the preview is bound to.
+    vscode.commands.registerCommand("mdHtmlPreview.exportHtml", () => manager.exportHtml()), vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()), vscode.commands.registerCommand("mdHtmlPreview.toggleSlideMode", () => manager.toggleSlideMode()), vscode.commands.registerCommand("mdHtmlPreview.toggleTheme", () => manager.toggleTheme()));
     // Discard any panel restored after a window reload — the live preview is cheap to
     // reopen and we deliberately do not persist the source-document binding.
     if (vscode.window.registerWebviewPanelSerializer) {

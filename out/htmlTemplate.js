@@ -3,7 +3,10 @@
  * Full HTML document shell.
  *
  * Builds the `<head>`/`<body>` wrapper around the rendered article: inlined CSS,
- * KaTeX from CDN, the Freesentation font, A4 print CSS, and one unified client script.
+ * KaTeX / highlight.js / Mermaid, the Freesentation font, A4 print CSS, and one unified
+ * client script. Where those third-party assets come from — extension-local files, inlined
+ * text, or the CDN — is decided by the caller and arrives in `options.assets`
+ * (see `src/assets.ts`); this module only decides how to emit them.
  *
  * The client script is shared by both modes and drives:
  *  - KaTeX / highlight.js / Mermaid rendering (RENDER_BODY),
@@ -14,11 +17,12 @@
  *  - and, in **preview** mode only, bidirectional editor⇄preview scroll sync.
  *
  * Two CSP profiles: **preview** (`cspSource` supplied) keys the policy to the Webview
- * origin; **export** (no `cspSource`) is a portable standalone file with a CDN-only CSP.
- * Both nonce every script and never enable `script-src 'unsafe-inline'`.
+ * origin; **export** (no `cspSource`) is a portable standalone file. Either widens to the
+ * CDN origin only when the assets actually come from there. Both nonce every script and
+ * never enable `script-src 'unsafe-inline'`.
  */
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.MERMAID_JS_SRC = exports.HLJS_JS_SRC = exports.KATEX_JS_SRC = exports.KATEX_CSS_HREF = void 0;
+exports.CDN_ASSETS = exports.MERMAID_JS_SRC = exports.HLJS_JS_SRC = exports.KATEX_JS_SRC = exports.KATEX_CSS_HREF = void 0;
 exports.buildHtmlDocument = buildHtmlDocument;
 const htmlEscape_1 = require("./htmlEscape");
 exports.KATEX_CSS_HREF = "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css";
@@ -336,6 +340,9 @@ function clientScript(isPreview, nonce, scrollSync) {
     return '<button class="ui-menu-item" role="menuitemradio" data-group="' + group +
       '" data-val="' + val + '">' + label + '</button>';
   }
+  function menuAction(act, label) {
+    return '<button class="ui-menu-item" role="menuitem" data-act="' + act + '">' + label + '</button>';
+  }
   function openMenu(x, y) {
     closeMenu();
     menuEl = document.createElement('div');
@@ -348,12 +355,22 @@ function clientScript(isPreview, nonce, scrollSync) {
       '<div class="ui-menu-sep"></div>' +
       '<div class="ui-menu-label">모드</div>' +
       menuItem('mode', 'document', '문서') +
-      menuItem('mode', 'slide', '슬라이드');
+      menuItem('mode', 'slide', '슬라이드') +
+      // Commands need the extension host, so they only exist in the preview — an already
+      // exported file has nothing to post to.
+      (IS_PREVIEW
+        ? '<div class="ui-menu-sep"></div>' +
+          '<div class="ui-menu-label">내보내기</div>' +
+          menuAction('exportHtml', 'HTML로 저장…') +
+          menuAction('print', '인쇄 / PDF로 저장…')
+        : '');
     document.body.appendChild(menuEl);
     var w = menuEl.offsetWidth, h = menuEl.offsetHeight;
     menuEl.style.left = Math.max(6, Math.min(x, window.innerWidth - w - 8)) + 'px';
     menuEl.style.top = Math.max(6, Math.min(y, window.innerHeight - h - 8)) + 'px';
     menuEl.addEventListener('click', function (ev) {
+      var act = ev.target.closest ? ev.target.closest('[data-act]') : null;
+      if (act) { post({ type: act.getAttribute('data-act') }); closeMenu(); return; }
       var it = ev.target.closest ? ev.target.closest('[data-val]') : null;
       if (!it) return;
       var g = it.getAttribute('data-group'), v = it.getAttribute('data-val');
@@ -474,52 +491,99 @@ function clientScript(isPreview, nonce, scrollSync) {
 }());
 </script>`;
 }
-function previewCsp(cspSource, nonce) {
+/** The CDN origin, listed only when an asset still comes from there. */
+function cdn(usesCdn) {
+    return usesCdn ? ` ${CDN_ORIGIN}` : "";
+}
+function previewCsp(cspSource, nonce, usesCdn) {
     return ("default-src 'none'; " +
         `img-src ${cspSource} https: data: blob:; ` +
-        `style-src ${cspSource} ${CDN_ORIGIN} 'unsafe-inline'; ` +
-        `font-src ${cspSource} ${CDN_ORIGIN} data:; ` +
-        `script-src 'nonce-${nonce}' ${CDN_ORIGIN};`);
+        `style-src ${cspSource}${cdn(usesCdn)} 'unsafe-inline'; ` +
+        `font-src ${cspSource}${cdn(usesCdn)} data:; ` +
+        `script-src 'nonce-${nonce}'${cdn(usesCdn)};`);
 }
-function exportCsp(nonce) {
+/**
+ * Standalone files carry everything they need inline, so the offline policy grants no
+ * network origin at all beyond images (a document may legitimately reference remote ones).
+ */
+function exportCsp(nonce, usesCdn) {
     return ("default-src 'none'; " +
         "img-src https: data:; " +
-        `style-src 'unsafe-inline' ${CDN_ORIGIN}; ` +
-        `font-src ${CDN_ORIGIN} data:; ` +
-        `script-src 'nonce-${nonce}' ${CDN_ORIGIN};`);
+        `style-src 'unsafe-inline'${cdn(usesCdn)}; ` +
+        `font-src data:${cdn(usesCdn)}; ` +
+        `script-src 'nonce-${nonce}'${cdn(usesCdn)};`);
+}
+/** jsDelivr URLs, used when `media/vendor/` was never populated (see src/assets.ts). */
+exports.CDN_ASSETS = {
+    fontCss: [
+        ["Freesentation-4Regular.woff2", 400],
+        ["Freesentation-7Bold.woff2", 700],
+    ]
+        .map(([file, weight]) => `@font-face{font-family:'Presentation';src:url("${CDN_ORIGIN}/gh/projectnoonnu/2404@1.0/${file}") ` +
+        `format('woff2');font-weight:${weight};font-style:normal;font-display:swap}`)
+        .join("\n"),
+    katexCss: { href: exports.KATEX_CSS_HREF },
+    katexJs: { href: exports.KATEX_JS_SRC },
+    hljsJs: { href: exports.HLJS_JS_SRC },
+    mermaidJs: { href: exports.MERMAID_JS_SRC },
+    usesCdn: true,
+};
+/**
+ * `</script` / `</style` inside a bundle's own string literals would end the tag early.
+ * Neither current bundle contains one, but a future version might, and the escape is inert
+ * everywhere else.
+ */
+function escapeForTag(body, tag) {
+    return body.replace(new RegExp(`</(${tag})`, "gi"), "<\\/$1");
+}
+function styleTag(ref, nonceAttr) {
+    return ref.text !== undefined
+        ? `<style${nonceAttr}>\n${escapeForTag(ref.text, "style")}\n</style>`
+        : `<link rel="stylesheet"${nonceAttr} href="${ref.href}">`;
+}
+/**
+ * Inlined bundles are emitted WITHOUT `defer` — a classic inline script runs the moment it
+ * is parsed, which is still before the client script's DOMContentLoaded init, so
+ * window.katex / hljs / mermaid are ready either way.
+ */
+function scriptTag(ref, nonceAttr) {
+    return ref.text !== undefined
+        ? `<script${nonceAttr}>\n${escapeForTag(ref.text, "script")}\n</script>`
+        : `<script defer${nonceAttr} src="${ref.href}"></script>`;
 }
 function buildHtmlDocument(options) {
-    const { title, articleHtml, css, cspSource, nonce, scrollSync = true, theme = "dark", mode = "document", } = options;
+    const { title, articleHtml, css, cspSource, nonce, scrollSync = true, theme = "dark", mode = "document", assets = exports.CDN_ASSETS, } = options;
     const isPreview = Boolean(cspSource);
     let csp = "";
     if (isPreview && nonce) {
-        csp = previewCsp(cspSource, nonce);
+        csp = previewCsp(cspSource, nonce, assets.usesCdn);
     }
     else if (nonce) {
-        csp = exportCsp(nonce);
+        csp = exportCsp(nonce, assets.usesCdn);
     }
     const cspMeta = csp ? `<meta http-equiv="Content-Security-Policy" content="${csp}">\n` : "";
     const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
-    const katexScript = `<script defer${nonceAttr} src="${exports.KATEX_JS_SRC}"></script>`;
+    const katexScript = scriptTag(assets.katexJs, nonceAttr);
     const renderScript = clientScript(isPreview, nonce ?? "", scrollSync);
     // Load highlight.js only when a fenced code block with a language is present. Token COLORS
     // come from preview.css (theme-aware, light/dark) — we deliberately do NOT load a stock
     // hljs theme stylesheet, whose fixed light palette was invisible on the dark background.
     const hasCode = articleHtml.includes('class="language-');
-    const hljsScript = hasCode ? `\n<script defer${nonceAttr} src="${exports.HLJS_JS_SRC}"></script>` : "";
-    // Load Mermaid only when a `<pre class="mermaid">` diagram is present. `defer` makes it
-    // execute before DOMContentLoaded, so window.mermaid is ready when RENDER_BODY runs in
-    // both the preview and export render scripts. No CSP change is required (see CDN_ORIGIN).
+    const hljsScript = hasCode ? `\n${scriptTag(assets.hljsJs, nonceAttr)}` : "";
+    // Load Mermaid only when a `<pre class="mermaid">` diagram is present — it is by far the
+    // largest asset (~3.5 MB), so keeping it out of diagram-free exports matters. Mermaid
+    // injects its own <style> at runtime, which style-src 'unsafe-inline' already permits.
     const hasMermaid = articleHtml.includes('class="mermaid"');
-    const mermaidScript = hasMermaid ? `\n<script defer${nonceAttr} src="${exports.MERMAID_JS_SRC}"></script>` : "";
+    const mermaidScript = hasMermaid ? `\n${scriptTag(assets.mermaidJs, nonceAttr)}` : "";
     return `<!doctype html>
 <html lang="ko" data-theme="${theme}" data-mode="${mode}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 ${cspMeta}<title>${(0, htmlEscape_1.escapeHtml)(title)}</title>
-<link rel="stylesheet" href="${exports.KATEX_CSS_HREF}">
-<style>
+${styleTag(assets.katexCss, nonceAttr)}
+<style${nonceAttr}>
+${assets.fontCss}
 ${css}
 </style>
 ${katexScript}${hljsScript}${mermaidScript}
