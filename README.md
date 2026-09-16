@@ -38,7 +38,10 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   the editor's **source line** (not a pixel offset), images load eagerly with their
   intrinsic `width`/`height`, Mermaid boxes keep their last height, and nothing is
   reported back to the editor for 0.8 s — so typing next to a figure or inside a
-  `<!-- NOTE -->` no longer makes the preview jump and drag the editor along. Edits are
+  `<!-- NOTE -->` no longer makes the preview jump and drag the editor along. In **slide
+  mode** the preview follows the **caret's** slide (the viewport centre spans several short
+  slides), and a source line is mapped to its slide by the `---` separators — comments and
+  blank lines included. Edits are
   applied **in place** (the article is swapped and KaTeX / highlight.js / Mermaid re-run
   on it); the page is only rebuilt when the settings or the document change (v0.5.0).
 - **Print / Save as PDF** — `Markdown HTML Preview: Print / Save as PDF`
