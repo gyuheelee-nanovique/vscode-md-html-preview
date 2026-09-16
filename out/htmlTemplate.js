@@ -248,6 +248,11 @@ function clientScript(isPreview, nonce, scrollSync, printFrames) {
 
   // ---- slides ----
   var deck = null, slides = [], slideLines = [];
+  // Source lines of the '---' separators (stamped on hr.slide-sep) and, for each kept slide,
+  // its raw section index. A source line belongs to section (number of separators at or
+  // before it) — comments, blank lines and unstamped blocks included — so the editor and
+  // the deck agree slide-for-slide instead of via each slide's first stamped block.
+  var sepLines = [], slideRaw = [];
   function teardownDeck() {
     if (deck && deck.parentNode) deck.parentNode.removeChild(deck);
     deck = null; slides = [];
@@ -261,13 +266,20 @@ function clientScript(isPreview, nonce, scrollSync, printFrames) {
     var current = document.createElement('section');
     current.className = 'slide';
     var kids = Array.prototype.slice.call(article.childNodes);
+    sepLines = [];
+    var rawIndex = 0;
+    current.setAttribute('data-raw', '0');
     for (var i = 0; i < kids.length; i++) {
       var node = kids[i];
       var isSep = node.nodeType === 1 && node.classList && node.classList.contains('slide-sep');
       if (isSep) {
+        var sl = parseInt(node.getAttribute('data-source-line'), 10);
+        sepLines.push(isNaN(sl) ? Infinity : sl);
         deck.appendChild(current);
+        rawIndex += 1;
         current = document.createElement('section');
         current.className = 'slide';
+        current.setAttribute('data-raw', String(rawIndex));
       } else {
         current.appendChild(node.cloneNode(true));
       }
@@ -278,6 +290,7 @@ function clientScript(isPreview, nonce, scrollSync, printFrames) {
     slides = all.filter(function (s) {
       return s.textContent.trim().length > 0 || s.querySelector('img, svg, table');
     });
+    slideRaw = slides.map(function (s) { return parseInt(s.getAttribute('data-raw'), 10) || 0; });
     deck.innerHTML = '';
     for (var j = 0; j < slides.length; j++) deck.appendChild(slides[j]);
     if (!slides.length) { // no real content — keep one empty slide so the deck isn't blank
@@ -341,10 +354,14 @@ function clientScript(isPreview, nonce, scrollSync, printFrames) {
   function prevSlide() { gotoSlide(slideIndex - 1); }
   // Editor → preview (slide mode): show the slide whose source range holds the given line.
   function activateSlideForLine(line) {
-    if (!slideLines.length) return;
+    if (!slides.length) return;
+    // raw section = number of separators at or before this line (the '---' line itself
+    // opens the next slide); then the kept slide with the largest raw index <= that.
+    var raw = 0;
+    for (var s = 0; s < sepLines.length; s++) { if (sepLines[s] <= line) raw = s + 1; else break; }
     var idx = 0;
-    for (var i = 0; i < slideLines.length; i++) {
-      if (slideLines[i].start <= line) idx = i; else break;
+    for (var i = 0; i < slideRaw.length; i++) {
+      if (slideRaw[i] <= raw) idx = i; else break;
     }
     if (idx !== slideIndex) showSlide(idx);
   }

@@ -131,7 +131,8 @@ export class PreviewManager {
           this.open(editor);
         }
       }),
-      vscode.window.onDidChangeTextEditorVisibleRanges((e) => this.onEditorScroll(e))
+      vscode.window.onDidChangeTextEditorVisibleRanges((e) => this.onEditorScroll(e)),
+      vscode.window.onDidChangeTextEditorSelection((e) => this.onEditorSelection(e))
     );
   }
 
@@ -161,12 +162,45 @@ export class PreviewManager {
     const first = ranges[0].start.line;
     const last = ranges[ranges.length - 1].end.line;
     const center = Math.floor((first + last) / 2);
+    if (this.webviewMode === "slide") {
+      // Slide mode: the slide being edited is the caret's slide. A viewport of 40–60 lines
+      // spans three or four short slides, so the centre line is often a slide or two away
+      // from the caret. Follow the caret while it is on screen, else the centre; comments
+      // belong to their slide, so no mask here.
+      const caret = e.textEditor.selection.active.line;
+      const line = caret >= first && caret <= last ? caret : center;
+      this.lastEditorCenter = line;
+      void this.panel.webview.postMessage({ type: "scrollToLine", line });
+      return;
+    }
     const mask = this.commentMaskFor(e.textEditor.document);
     if (mask[center]) {
       return; // centre line is an invisible comment — freeze the preview
     }
     this.lastEditorCenter = center;
     void this.panel.webview.postMessage({ type: "scrollToLine", line: center });
+  }
+
+  /** Slide mode only: moving the caret (click, arrow keys, typing) selects that slide. */
+  private onEditorSelection(e: vscode.TextEditorSelectionChangeEvent): void {
+    if (!this.panel || !this.sourceUri || this.webviewMode !== "slide") {
+      return;
+    }
+    if (e.textEditor.document.uri.toString() !== this.sourceUri.toString()) {
+      return;
+    }
+    if (Date.now() < this.ignoreEditorScrollUntil) {
+      return;
+    }
+    if (!this.readConfig(this.sourceUri).scrollSync) {
+      return;
+    }
+    const line = e.selections[0]?.active.line;
+    if (typeof line !== "number") {
+      return;
+    }
+    this.lastEditorCenter = line;
+    void this.panel.webview.postMessage({ type: "scrollToLine", line });
   }
 
   /** Comment-line mask for the document, cached per version (recomputed on edit). */
