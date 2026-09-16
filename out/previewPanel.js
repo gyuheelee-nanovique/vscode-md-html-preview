@@ -104,6 +104,8 @@ class PreviewManager {
         this.currentRootPaths = [];
         /** While set (epoch ms), ignore editor scroll events — they were caused by us revealing. */
         this.ignoreEditorScrollUntil = 0;
+        /** Resolvers waiting for the next `uiState` (see `queryWebviewState`). */
+        this.stateWaiters = [];
         /** Intrinsic image sizes, keyed by absolute path + mtime (cheap header reads, cached). */
         this.imageSizeCache = new Map();
         /**
@@ -176,6 +178,10 @@ class PreviewManager {
             this.webviewMode = message.mode === "slide" ? "slide" : "document";
             this.webviewTheme = message.theme === "light" ? "light" : "dark";
             this.webviewReady = true;
+            const waiters = this.stateWaiters;
+            this.stateWaiters = [];
+            for (const w of waiters)
+                w();
             return;
         }
         if (message.type === "exportHtml") {
@@ -184,6 +190,10 @@ class PreviewManager {
         }
         if (message.type === "print") {
             void this.print();
+            return;
+        }
+        if (message.type === "printSlides") {
+            void this.printSlides();
             return;
         }
         if (!this.sourceUri || message.type !== "revealLine" || typeof message.line !== "number") {
@@ -254,11 +264,41 @@ class PreviewManager {
      */
     async print() {
         // Slide mode in the preview prints as 16:9 video frames; document mode as the A4 paper.
+        // Ask the live page rather than trusting the last message we happened to see.
         const boundToTarget = this.panel !== undefined &&
             this.sourceUri !== undefined &&
             this.commandTargetUri()?.toString() === this.sourceUri.toString();
-        const frames = boundToTarget && this.webviewMode === "slide";
-        await this.printAs(frames);
+        let mode = this.webviewMode;
+        if (boundToTarget) {
+            mode = (await this.queryWebviewState()) ?? mode;
+        }
+        if (mode === undefined) {
+            mode = this.readConfig(this.commandTargetUri()).defaultMode;
+        }
+        await this.printAs(mode === "slide");
+    }
+    /** Round-trip to the Webview for its current mode; undefined if it does not answer in time. */
+    queryWebviewState() {
+        const panel = this.panel;
+        if (!panel)
+            return Promise.resolve(undefined);
+        return new Promise((resolve) => {
+            let done = false;
+            const finish = () => {
+                if (done)
+                    return;
+                done = true;
+                resolve(this.webviewMode);
+            };
+            this.stateWaiters.push(finish);
+            setTimeout(() => {
+                if (!done) {
+                    done = true;
+                    resolve(undefined);
+                }
+            }, 700);
+            void panel.webview.postMessage({ type: "queryState" });
+        });
     }
     /** "Print Slides as 16:9 PDF": the video-frame layout regardless of the preview's mode. */
     async printSlides() {

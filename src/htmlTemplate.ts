@@ -118,6 +118,7 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
   var IS_PREVIEW = ${isPreview ? "true" : "false"};
   var SCROLL_SYNC = ${scrollSync ? "true" : "false"};
   var PRINT_FRAMES = ${printFrames ? "true" : "false"};
+  var FRAMES_CSS = ${JSON.stringify(framesCss())};
   // One lecture-video frame in CSS px: render_slide_pngs.js lays the deck out at
   // 1280x720 / zoom 1.5 = 853.33x480 and rasterises at deviceScaleFactor 4.5 -> 3840x2160.
   var FRAME_W = 2560 / 3, FRAME_H = 480;
@@ -478,15 +479,24 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
         ? '<div class="ui-menu-sep"></div>' +
           '<div class="ui-menu-label">내보내기</div>' +
           menuAction('exportHtml', 'HTML로 저장…') +
-          menuAction('print', '인쇄 / PDF로 저장…')
-        : '');
+          menuAction('print', '인쇄 / PDF로 저장…') +
+          menuAction('printSlides', '16:9 슬라이드(영상 프레임) PDF…')
+        : (PRINT_FRAMES ? '' :
+          '<div class="ui-menu-sep"></div>' +
+          '<div class="ui-menu-label">인쇄</div>' +
+          menuAction('enterFrames', '16:9 슬라이드(영상 프레임) 레이아웃으로')));
     document.body.appendChild(menuEl);
     var w = menuEl.offsetWidth, h = menuEl.offsetHeight;
     menuEl.style.left = Math.max(6, Math.min(x, window.innerWidth - w - 8)) + 'px';
     menuEl.style.top = Math.max(6, Math.min(y, window.innerHeight - h - 8)) + 'px';
     menuEl.addEventListener('click', function (ev) {
       var act = ev.target.closest ? ev.target.closest('[data-act]') : null;
-      if (act) { post({ type: act.getAttribute('data-act') }); closeMenu(); return; }
+      if (act) {
+        var name = act.getAttribute('data-act');
+        if (name === 'enterFrames') enterFrames(); else post({ type: name });
+        closeMenu();
+        return;
+      }
       var it = ev.target.closest ? ev.target.closest('[data-val]') : null;
       if (!it) return;
       var g = it.getAttribute('data-group'), v = it.getAttribute('data-val');
@@ -620,6 +630,10 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
       if (mode === 'slide') { activateSlideForLine(msg.line); return; }
       if (!lineMap.length) buildMap();
       scrollToLine(msg.line);
+    } else if (msg.type === 'queryState') {
+      // The extension asks right before printing: answer with the live mode/theme so the
+      // decision never depends on an earlier message having been seen.
+      post({ type: 'uiState', mode: mode, theme: theme, reply: true });
     } else if (msg.type === 'update') {
       if (typeof msg.articleHtml === 'string') applyUpdate(msg.articleHtml, msg.anchorLine);
     } else if (msg.type === 'setTheme') {
@@ -655,9 +669,7 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
     root.setAttribute('data-theme', theme);
     if (PRINT_FRAMES) {
       // Video-frame print layout: no deck, no sync, no scroll chrome — just the frames.
-      root.setAttribute('data-mode', 'slide');
-      disablePrintRules();
-      runMermaid(afterRender); // -> buildFrames() once diagrams (if any) are in
+      enterFrames();
       return;
     }
     autoHide(window);
@@ -680,6 +692,24 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
   }
 
   // ================= 16:9 video-frame print layout (export only) =================
+  // Switch this page into the frames layout: from the start (printFrames export) or later,
+  // from the right-click menu of any saved / printed HTML that is being viewed as slides.
+  function enterFrames() {
+    PRINT_FRAMES = true;
+    mode = 'slide';
+    root.setAttribute('data-print', 'frames');
+    root.setAttribute('data-mode', 'slide');
+    if (!document.getElementById('frames-style')) {
+      var st = document.createElement('style');
+      st.id = 'frames-style';
+      st.textContent = FRAMES_CSS;
+      document.head.appendChild(st);
+    }
+    teardownDeck();
+    closeMenu();
+    disablePrintRules();
+    runMermaid(afterRender); // -> buildFrames() once diagrams (if any) are in
+  }
   // Mirrors render_slide_pngs.js: one .slide-page per video page, the .slide inside laid
   // out exactly as the deck's slide mode (same class, same CSS, fixed to FRAME_W x FRAME_H),
   // images capped at 62% of the frame height (--fit-images 62), pages split greedily at
@@ -745,7 +775,13 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
     sl.className = 'slide active';
     var wrap = document.createElement('div');
     wrap.className = 'pg-scroll';
-    for (var i = 0; i < group.length; i++) wrap.appendChild(group[i].cloneNode(true));
+    for (var i = 0; i < group.length; i++) {
+      var node = group[i];
+      // The video frames carry no slide-number badge — drop it even when the page was
+      // exported with badges and switched into frames afterwards.
+      if (node.nodeType === 1 && node.classList && node.classList.contains('slide-no')) continue;
+      wrap.appendChild(node.cloneNode(true));
+    }
     sl.appendChild(wrap);
     pg.appendChild(sl);
     return pg;
@@ -830,9 +866,11 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, pr
  * the stylesheet's own `@media print` / `@page` rules in this mode — see `disablePrintRules`.
  */
 function framesStyleTag(nonceAttr: string): string {
+  return `<style id="frames-style"${nonceAttr}>\n${framesCss()}\n</style>`;
+}
+function framesCss(): string {
   const W = "853.333px", H = "480px";
-  return `<style id="frames-style"${nonceAttr}>
-@page { size: ${W} ${H}; margin: 0; }
+  return `@page { size: ${W} ${H}; margin: 0; }
 :root[data-print="frames"] body { overflow: auto !important; margin: 0; background: #3a3a3a; }
 :root[data-print="frames"] main {
   position: absolute; left: 0; top: 0; width: ${W}; visibility: hidden; pointer-events: none;
@@ -857,8 +895,7 @@ function framesStyleTag(nonceAttr: string): string {
   .frames .slide-page:last-child { break-after: auto; page-break-after: auto; }
   .frames, .frames * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .frames .slide-page > .slide { overflow: hidden; }
-}
-</style>`;
+}`;
 }
 
 /** The CDN origin, listed only when an asset still comes from there. */

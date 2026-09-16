@@ -53,7 +53,9 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   `data-fit` — the video cuts it instead. Prints in the theme the
   page shows (switch it with the right-click menu before `Ctrl/Cmd+P`); no slide-number
   badge, like the video. In Chromium's print dialog keep **margins: none** and **background
-  graphics: on**. (VS Code webviews are sandboxed without `allow-modals`, so an in-webview
+  graphics: on**. The layout is decided by asking the live preview for its current mode; and
+  any saved / printed HTML can be switched into the frames layout from its own right-click
+  menu (`16:9 슬라이드(영상 프레임) 레이아웃으로`) before pressing `Ctrl/Cmd+P`. (VS Code webviews are sandboxed without `allow-modals`, so an in-webview
   `window.print()` is blocked — the browser hand-off is the reliable path.)
 - **A4 print CSS** — `@page { size: A4 }`, repeating table headers, and break-avoid
   rules, so browser print / PDF looks right.
