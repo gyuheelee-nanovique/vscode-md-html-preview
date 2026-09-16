@@ -19,6 +19,7 @@ import { spawn } from "child_process";
 import { markdownToArticleHtml, commentLineMask, RenderOptions, RenderResult } from "./markdownRenderer";
 import { buildHtmlDocument } from "./htmlTemplate";
 import { AssetProvider } from "./assets";
+import { readImageSize } from "./imageSize";
 
 const MIME_BY_EXT: Record<string, string> = {
   ".png": "image/png",
@@ -42,6 +43,7 @@ interface PreviewConfig {
   defaultTheme: "light" | "dark";
   defaultMode: "document" | "slide";
   offlineExport: boolean;
+  showSlideNumbers: boolean;
 }
 
 function guessMime(file: string): string {
@@ -89,6 +91,20 @@ export class PreviewManager {
   private ignoreEditorScrollUntil = 0;
   /** Cached comment-line mask, keyed by the document version it was computed from. */
   private commentMaskCache: { version: number; mask: boolean[] } | undefined;
+  /** The editor's centre source line as last pushed to the preview — the reload anchor. */
+  private lastEditorCenter: number | undefined;
+  /** View mode / theme the Webview currently shows (reported by the client's uiState). */
+  private webviewMode: "document" | "slide" | undefined;
+  private webviewTheme: "light" | "dark" | undefined;
+  /** Intrinsic image sizes, keyed by absolute path + mtime (cheap header reads, cached). */
+  private readonly imageSizeCache = new Map<string, { width: number; height: number } | null>();
+  /**
+   * Set once the Webview's client has booted (its first `uiState`). While true, a document
+   * edit is delivered as an in-place `update` message instead of replacing `webview.html`.
+   */
+  private webviewReady = false;
+  /** Everything but the article that went into the current page — a change forces a reload. */
+  private pageSignature = "";
   private readonly cssText: string;
   private readonly assets: AssetProvider;
 
@@ -104,7 +120,7 @@ export class PreviewManager {
       }),
       vscode.workspace.onDidChangeConfiguration((e) => {
         if (e.affectsConfiguration("mdHtmlPreview")) {
-          void this.render();
+          void this.render(true);
         }
       }),
       vscode.window.onDidChangeActiveTextEditor((editor) => {
@@ -147,6 +163,7 @@ export class PreviewManager {
     if (mask[center]) {
       return; // centre line is an invisible comment — freeze the preview
     }
+    this.lastEditorCenter = center;
     void this.panel.webview.postMessage({ type: "scrollToLine", line: center });
   }
 
@@ -159,7 +176,13 @@ export class PreviewManager {
   }
 
   /** Messages from the Webview: scroll sync, plus the right-click menu's export commands. */
-  private onPreviewMessage(message: { type?: string; line?: number }): void {
+  private onPreviewMessage(message: { type?: string; line?: number; mode?: string; theme?: string }): void {
+    if (message.type === "uiState") {
+      this.webviewMode = message.mode === "slide" ? "slide" : "document";
+      this.webviewTheme = message.theme === "light" ? "light" : "dark";
+      this.webviewReady = true;
+      return;
+    }
     if (message.type === "exportHtml") {
       void this.exportHtml();
       return;
@@ -208,7 +231,8 @@ export class PreviewManager {
   private buildStandaloneHtml(
     uri: vscode.Uri,
     doc: vscode.TextDocument,
-    forPrint = false
+    forPrint = false,
+    frames = false
   ): { html: string; result: RenderResult } {
     const cfg = this.readConfig(uri);
     const baseDir = uri.scheme === "file" ? path.dirname(uri.fsPath) : undefined;
@@ -219,14 +243,21 @@ export class PreviewManager {
       openReferences: true, // keep references open for print
       resolveImage: this.makeResolveImage(baseDir, undefined, true),
       sourceLines: false,
+      // Video frames carry no badge: the lecture renderer never turns slide numbers on.
+      slideNumbers: frames ? false : cfg.showSlideNumbers,
+      eagerImages: frames, // the frame split needs every image's box before it measures
     });
     const html = buildHtmlDocument({
       title: path.basename(uri.fsPath || uri.path),
       articleHtml: result.articleHtml,
-      css: this.cssText,
+      css: this.cssText + this.deckCss(uri),
       nonce: getNonce(),
-      theme: forPrint ? "light" : cfg.defaultTheme,
-      mode: forPrint ? "document" : cfg.defaultMode,
+      // Frames print in whatever theme the page shows (the preview's current theme; the
+      // right-click menu in the browser can still switch it). The A4 document print stays
+      // light — see the comment above.
+      theme: frames ? this.webviewTheme ?? cfg.defaultTheme : forPrint ? "light" : cfg.defaultTheme,
+      mode: frames ? "slide" : forPrint ? "document" : cfg.defaultMode,
+      printFrames: frames,
       assets: this.assets.exportAssets(cfg.offlineExport),
     });
     return { html, result };
@@ -239,6 +270,21 @@ export class PreviewManager {
    * `window.print()` is silently blocked — hence the browser hand-off.
    */
   async print(): Promise<void> {
+    // Slide mode in the preview prints as 16:9 video frames; document mode as the A4 paper.
+    const boundToTarget =
+      this.panel !== undefined &&
+      this.sourceUri !== undefined &&
+      this.commandTargetUri()?.toString() === this.sourceUri.toString();
+    const frames = boundToTarget && this.webviewMode === "slide";
+    await this.printAs(frames);
+  }
+
+  /** "Print Slides as 16:9 PDF": the video-frame layout regardless of the preview's mode. */
+  async printSlides(): Promise<void> {
+    await this.printAs(true);
+  }
+
+  private async printAs(frames: boolean): Promise<void> {
     const uri = this.commandTargetUri();
     if (!uri) {
       vscode.window.showWarningMessage("먼저 Markdown 문서를 열거나 미리보기를 여세요.");
@@ -252,12 +298,16 @@ export class PreviewManager {
       return;
     }
 
-    const { html } = this.buildStandaloneHtml(uri, doc, true);
+    const { html } = this.buildStandaloneHtml(uri, doc, true, frames);
     const rawBase = path.basename(uri.fsPath || uri.path).replace(/\.(md|markdown)$/i, "");
     // Keep the temp filename ASCII-only: a non-ASCII name (e.g. Korean) gets percent-
     // encoded by Uri.file and ShellExecute then fails to find the literal file (error 0x2).
     const base = rawBase.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "preview";
-    const tmpPath = path.join(os.tmpdir(), `mdpreview-${base}-${crypto.randomBytes(3).toString("hex")}.html`);
+    const kind = frames ? "-frames" : "";
+    const tmpPath = path.join(
+      os.tmpdir(),
+      `mdpreview-${base}${kind}-${crypto.randomBytes(3).toString("hex")}.html`
+    );
     try {
       fs.writeFileSync(tmpPath, html, "utf8");
     } catch (err) {
@@ -269,8 +319,10 @@ export class PreviewManager {
 
     this.openInBrowser(tmpPath);
     vscode.window.setStatusBarMessage(
-      "브라우저에서 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P).",
-      6000
+      frames
+        ? "16:9 슬라이드(영상 프레임)로 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P · 배경 그래픽 켜기 · 여백 없음)."
+        : "브라우저에서 인쇄하거나 PDF로 저장하세요 (Cmd/Ctrl+P).",
+      8000
     );
   }
 
@@ -333,6 +385,35 @@ export class PreviewManager {
     }
   }
 
+  /**
+   * A per-course stylesheet that lives beside the document, appended AFTER preview.css so it
+   * wins. Walk up from the file for at most six levels looking for `_deck.css` — the same
+   * rule (and the same cap) as the batch renderer `render_md_html.js:findDeckCss`, so the
+   * preview, "Save as PDF", and the lecture pipeline all resolve to one file.
+   *
+   * Keep the two in step: a course puts its print-only corrections there (e.g. the CFD deck
+   * pins mermaid label metrics under `@media print`), and if only one path reads it the
+   * preview and the printed PDF disagree in ways that are invisible on screen.
+   */
+  private deckCss(uri: vscode.Uri | undefined): string {
+    if (!uri || uri.scheme !== "file") return "";
+    let dir = path.dirname(uri.fsPath);
+    for (let i = 0; i < 6; i++) {
+      const p = path.join(dir, "_deck.css");
+      try {
+        if (fs.existsSync(p)) {
+          return "\n\n/* ---- 덱 CSS: " + p + " ---- */\n" + fs.readFileSync(p, "utf8");
+        }
+      } catch {
+        /* unreadable — treat as absent */
+      }
+      const up = path.dirname(dir);
+      if (up === dir) break;
+      dir = up;
+    }
+    return "";
+  }
+
   private readConfig(scope?: vscode.Uri): PreviewConfig {
     const cfg = vscode.workspace.getConfiguration("mdHtmlPreview", scope ?? null);
     return {
@@ -346,6 +427,7 @@ export class PreviewManager {
       defaultTheme: cfg.get<string>("defaultTheme", "dark") === "light" ? "light" : "dark",
       defaultMode: cfg.get<string>("defaultMode", "document") === "slide" ? "slide" : "document",
       offlineExport: cfg.get<boolean>("offlineExport", true),
+      showSlideNumbers: cfg.get<boolean>("showSlideNumbers", true),
     };
   }
 
@@ -423,6 +505,8 @@ export class PreviewManager {
         }
       );
       this.panel = panel;
+      this.webviewReady = false; // a new page has to boot before it can take in-place updates
+      this.pageSignature = "";
       this.currentRootPaths = roots.map((r) => r.fsPath);
       // Track this panel's subscriptions in a per-panel store (disposed when it fires),
       // not context.subscriptions, so re-creating the panel does not leak dead listeners.
@@ -430,6 +514,7 @@ export class PreviewManager {
       panel.webview.onDidReceiveMessage((m) => this.onPreviewMessage(m), null, panelDisposables);
       panel.onDidDispose(
         () => {
+          this.webviewReady = false;
           if (this.panel === panel) {
             this.panel = undefined;
             this.currentRootPaths = [];
@@ -498,7 +583,7 @@ export class PreviewManager {
     };
   }
 
-  private async render(): Promise<void> {
+  private async render(forceReload = false): Promise<void> {
     if (!this.panel || !this.sourceUri) {
       return;
     }
@@ -523,23 +608,85 @@ export class PreviewManager {
       removeTopImages: cfg.removeTopImages,
       openReferences: cfg.openReferences,
       resolveImage: this.makeResolveImage(baseDir, webview, cfg.embedImages),
+      slideNumbers: cfg.showSlideNumbers,
+      // Both keep the layout from shifting after the page loads (which is what made the
+      // scroll-sync land on the wrong text and then yank the editor along):
+      eagerImages: true,
+      imageSize: this.makeImageSize(baseDir),
     };
 
     const result = markdownToArticleHtml(doc.getText(), options);
+    const css = this.cssText + this.deckCss(this.sourceUri);
+    // Anything outside the article that shapes the page. Same signature → the page can take
+    // the new article in place; different → rebuild the whole document.
+    const signature = JSON.stringify([
+      this.sourceUri.toString(),
+      css.length,
+      cfg.scrollSync,
+      cfg.defaultTheme,
+      cfg.defaultMode,
+      cfg.embedImages,
+      cfg.showSlideNumbers,
+      result.articleHtml.includes('class="language-'),
+      result.articleHtml.includes('class="mermaid"'),
+    ]);
+    // The reload / update re-centres the preview itself; nothing the editor reports in the
+    // next moments is a user scroll (matches the client's SETTLE_MS).
+    this.ignoreEditorScrollUntil = Date.now() + 800;
+    if (!forceReload && this.webviewReady && signature === this.pageSignature) {
+      void webview.postMessage({
+        type: "update",
+        articleHtml: result.articleHtml,
+        anchorLine: this.lastEditorCenter,
+      });
+      this.panel.title = this.titleFor(this.sourceUri);
+      return;
+    }
     const html = buildHtmlDocument({
       title: this.titleFor(this.sourceUri),
       articleHtml: result.articleHtml,
-      css: this.cssText,
+      css,
       cspSource: webview.cspSource,
       nonce: getNonce(),
       scrollSync: cfg.scrollSync,
       theme: cfg.defaultTheme,
       mode: cfg.defaultMode,
+      anchorLine: this.lastEditorCenter,
       assets: this.assets.previewAssets(webview),
     });
-
+    this.webviewReady = false;
+    this.pageSignature = signature;
     webview.html = html;
     this.panel.title = this.titleFor(this.sourceUri);
+  }
+
+  /**
+   * Intrinsic size of a local image from its file header (PNG / JPEG / GIF / WebP), so the
+   * renderer can emit `width`/`height` and the box has its aspect ratio before the bytes
+   * arrive. Unknown formats (SVG, remote, data:) return null and render as before.
+   */
+  private makeImageSize(baseDir: string | undefined): (rel: string) => { width: number; height: number } | null {
+    return (rel: string) => {
+      if (!baseDir || isRemoteOrData(rel)) return null;
+      const abs = resolveLocalPath(baseDir, rel);
+      if (!abs) return null;
+      let key = abs;
+      try {
+        key = `${abs}|${fs.statSync(abs).mtimeMs}`;
+      } catch {
+        return null;
+      }
+      const hit = this.imageSizeCache.get(key);
+      if (hit !== undefined) return hit;
+      let dims: { width: number; height: number } | null = null;
+      try {
+        dims = readImageSize(abs);
+      } catch {
+        dims = null;
+      }
+      this.imageSizeCache.set(key, dims);
+      return dims;
+    };
   }
 
   /**

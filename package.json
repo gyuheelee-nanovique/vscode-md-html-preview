@@ -2,7 +2,7 @@
   "name": "vscode-md-html-preview",
   "displayName": "Markdown HTML Preview (Paper)",
   "description": "Live HTML preview tuned for PDF/docling paper Markdown: KaTeX math, Mermaid diagrams, image embedding, foldable references, docling tables, and A4 print CSS. Saves a fully offline standalone HTML file — every asset embedded, no network or dependencies needed to open it.",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "publisher": "nanovique",
   "license": "MIT",
   "repository": {
@@ -30,6 +30,7 @@
     "onCommand:mdHtmlPreview.open",
     "onCommand:mdHtmlPreview.exportHtml",
     "onCommand:mdHtmlPreview.print",
+    "onCommand:mdHtmlPreview.printSlides",
     "onCommand:mdHtmlPreview.toggleSlideMode",
     "onCommand:mdHtmlPreview.toggleTheme",
     "onWebviewPanel:mdHtmlPreview"
@@ -53,6 +54,12 @@
         "title": "Print / Save as PDF",
         "category": "Markdown HTML Preview",
         "icon": "$(printer)"
+      },
+      {
+        "command": "mdHtmlPreview.printSlides",
+        "title": "Print Slides as 16:9 PDF (video frames)",
+        "category": "Markdown HTML Preview",
+        "icon": "$(device-camera-video)"
       },
       {
         "command": "mdHtmlPreview.toggleSlideMode",
@@ -93,6 +100,10 @@
         },
         {
           "command": "mdHtmlPreview.print",
+          "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
+        },
+        {
+          "command": "mdHtmlPreview.printSlides",
           "when": "editorLangId == markdown || activeWebviewPanelId == mdHtmlPreview"
         },
         {
@@ -185,6 +196,11 @@
           "type": "boolean",
           "default": true,
           "markdownDescription": "Embed every asset — the webfont, KaTeX and its fonts, highlight.js, Mermaid — into the saved / printed HTML, so the file opens with **no network connection and no dependencies**. Turn off to link them from jsDelivr instead, which makes the file ~1.5 MB smaller (~5 MB smaller with Mermaid diagrams) but requires a connection to open."
+        },
+        "mdHtmlPreview.showSlideNumbers": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show a small `슬라이드 N / T` badge on every slide (the blocks between `---` separators) in the preview, the exported HTML and the printed PDF. The lecture-video renderer never turns this on, so video frames are unaffected."
         },
         "mdHtmlPreview.defaultMode": {
           "type": "string",

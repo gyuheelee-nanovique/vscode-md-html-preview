@@ -62,7 +62,7 @@ function activate(context) {
     // No active-editor guard here: like `print`, the command also fires from the preview's
     // own right-click menu, where focus is in the Webview and there is no active editor —
     // the manager falls back to the document the preview is bound to.
-    vscode.commands.registerCommand("mdHtmlPreview.exportHtml", () => manager.exportHtml()), vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()), vscode.commands.registerCommand("mdHtmlPreview.toggleSlideMode", () => manager.toggleSlideMode()), vscode.commands.registerCommand("mdHtmlPreview.toggleTheme", () => manager.toggleTheme()));
+    vscode.commands.registerCommand("mdHtmlPreview.exportHtml", () => manager.exportHtml()), vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()), vscode.commands.registerCommand("mdHtmlPreview.printSlides", () => manager.printSlides()), vscode.commands.registerCommand("mdHtmlPreview.toggleSlideMode", () => manager.toggleSlideMode()), vscode.commands.registerCommand("mdHtmlPreview.toggleTheme", () => manager.toggleTheme()));
     // Discard any panel restored after a window reload — the live preview is cheap to
     // reopen and we deliberately do not persist the source-document binding.
     if (vscode.window.registerWebviewPanelSerializer) {

@@ -85,6 +85,29 @@ export interface RenderOptions {
    * true; set false for the standalone export so the file carries no preview-only attrs.
    */
   sourceLines?: boolean;
+  /**
+   * Stamp a small "슬라이드 N / T" badge at the top of every slide (the blocks between
+   * successive `---` separators). Off by default so that renderers which must not change
+   * their output (the lecture-video PNG pipeline) stay byte-identical; the VS Code preview
+   * and the exported/printed HTML turn it on. `slideNumberStart` shifts N when only a slice
+   * of a deck is rendered (default 1).
+   */
+  slideNumbers?: boolean;
+  slideNumberStart?: number;
+  /**
+   * Emit `loading="eager"` on images instead of `lazy`. The live preview turns this on:
+   * a lazy image below the fold has no height until it is scrolled into view, so every
+   * block under it moves down by the image height when it finally loads — measured on the
+   * 4-1 deck: three figures 0 → 434–450 px, 20 of 53 blocks shifted, +1 334 px in total.
+   * The scroll-sync line map built before that is wrong for everything below the image.
+   */
+  eagerImages?: boolean;
+  /**
+   * Intrinsic pixel size of a local image, or `null` when unknown. When given, the `<img>`
+   * carries `width`/`height` attributes so the box has its aspect ratio BEFORE the bytes
+   * arrive (CSS keeps `height:auto`, so the attributes only fix the ratio, not the size).
+   */
+  imageSize?: (rel: string) => { width: number; height: number } | null;
 }
 
 export interface RenderResult {
@@ -616,9 +639,12 @@ export function markdownToArticleHtml(md: string, options: RenderOptions): Rende
       const src = resolveImage(rel);
       if (src) {
         renderedImages += 1;
+        const dims = options.imageSize ? options.imageSize(rel) : null;
+        const sizeAttrs = dims ? ` width="${dims.width}" height="${dims.height}"` : "";
+        const loading = options.eagerImages ? "eager" : "lazy";
         pushBlock(
           '<figure class="figure">' +
-            `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}" loading="lazy" decoding="async">` +
+            `<img src="${escapeAttr(src)}" alt="${escapeAttr(alt)}"${sizeAttrs} loading="${loading}" decoding="async">` +
             "</figure>"
         );
       } else {
@@ -778,10 +804,42 @@ export function markdownToArticleHtml(md: string, options: RenderOptions): Rende
       ? wrapReferences(blocks, referencesIndex, openReferences, withLines ? referencesLine : undefined)
       : blocks;
 
+  const numbered = options.slideNumbers
+    ? addSlideNumbers(finalBlocks, options.slideNumberStart ?? 1)
+    : finalBlocks;
+
   return {
-    articleHtml: finalBlocks.join("\n\n"),
+    articleHtml: numbered.join("\n\n"),
     imageCount,
     renderedImages,
     missingImages,
   };
+}
+
+/** `<hr class="slide-sep">`, possibly carrying a `data-source-line` stamp. */
+const SLIDE_SEP_RE = /^<hr class="slide-sep"[ >]/;
+
+/**
+ * Insert a `.slide-no` badge before the first block and after every slide separator.
+ * The client-side slide mode groups blocks between `.slide-sep` nodes, so the badge
+ * becomes the first child of each `.slide`; document mode shows it as a small
+ * right-aligned label above the slide's heading. Numbering counts separators only, so
+ * it matches the `---`-split numbering the TTS scripts and the narration use.
+ */
+export function addSlideNumbers(blocks: string[], start: number): string[] {
+  const total = blocks.filter((b) => SLIDE_SEP_RE.test(b)).length + 1;
+  const last = start + total - 1;
+  const badge = (n: number): string =>
+    `<div class="slide-no" aria-hidden="true" data-slide="${n}">슬라이드 ${n}` +
+    `<span class="slide-no-total"> / ${last}</span></div>`;
+  const out: string[] = [badge(start)];
+  let n = start;
+  for (const b of blocks) {
+    out.push(b);
+    if (SLIDE_SEP_RE.test(b)) {
+      n += 1;
+      out.push(badge(n));
+    }
+  }
+  return out;
 }

@@ -34,12 +34,27 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   citations stay plain (toggle with `mdHtmlPreview.autolinkUrls`).
 - **Scroll sync** — the editor and the preview stay aligned in **both directions**
   (scroll either side, the other follows), mapped via `data-source-line` markers.
-  Toggle with `mdHtmlPreview.scrollSync`.
+  Toggle with `mdHtmlPreview.scrollSync`. After every re-render the preview re-centres on
+  the editor's **source line** (not a pixel offset), images load eagerly with their
+  intrinsic `width`/`height`, Mermaid boxes keep their last height, and nothing is
+  reported back to the editor for 0.8 s — so typing next to a figure or inside a
+  `<!-- NOTE -->` no longer makes the preview jump and drag the editor along. Edits are
+  applied **in place** (the article is swapped and KaTeX / highlight.js / Mermaid re-run
+  on it); the page is only rebuilt when the settings or the document change (v0.5.0).
 - **Print / Save as PDF** — `Markdown HTML Preview: Print / Save as PDF`
   (`Ctrl/Cmd+'`) renders the standalone HTML and opens it in your **external browser**,
-  where `Ctrl/Cmd+P` prints or saves to PDF with the A4 print CSS. (VS Code webviews are
-  sandboxed without `allow-modals`, so an in-webview `window.print()` is blocked — the
-  browser hand-off is the reliable path.)
+  where `Ctrl/Cmd+P` prints or saves to PDF. In **document** mode that is the A4 paper
+  layout; in **slide** mode (or via `Print Slides as 16:9 PDF`) it is the **lecture-video
+  frame layout**: 853.33×480 CSS px per page (= the video renderer's 1280×720 / zoom 1.5,
+  i.e. 3840×2160 at print resolution), one page per video frame, the same greedy block
+  split and `<div class="pagebreak">` rule as `render_slide_pngs.js`, later blocks hidden
+  and the page scrolled to its first block exactly as the frame is. A page whose single
+  block is taller than the frame (a long code block) is scaled down to fit and tagged
+  `data-fit` — the video cuts it instead. Prints in the theme the
+  page shows (switch it with the right-click menu before `Ctrl/Cmd+P`); no slide-number
+  badge, like the video. In Chromium's print dialog keep **margins: none** and **background
+  graphics: on**. (VS Code webviews are sandboxed without `allow-modals`, so an in-webview
+  `window.print()` is blocked — the browser hand-off is the reliable path.)
 - **A4 print CSS** — `@page { size: A4 }`, repeating table headers, and break-avoid
   rules, so browser print / PDF looks right.
 - **Offline standalone HTML** — `Markdown HTML Preview: Save Standalone HTML` asks where
@@ -55,6 +70,7 @@ as the standalone HTML exporter, so what you see while editing is what the expor
 | --- | --- | --- |
 | Markdown HTML Preview: Open | `mdHtmlPreview.open` | `Ctrl/Cmd+Shift+Alt+V` |
 | Markdown HTML Preview: Print / Save as PDF | `mdHtmlPreview.print` | `Ctrl/Cmd+'` |
+| Markdown HTML Preview: Print Slides as 16:9 PDF (video frames) | `mdHtmlPreview.printSlides` | — |
 | Markdown HTML Preview: Save Standalone HTML | `mdHtmlPreview.exportHtml` | — |
 
 There is also an `Open` button in the editor title bar for Markdown files. The print

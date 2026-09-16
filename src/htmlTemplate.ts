@@ -71,6 +71,19 @@ export interface TemplateOptions {
   mode?: PreviewMode;
   /** Where KaTeX / highlight.js / Mermaid / the webfont come from. Defaults to the CDN. */
   assets?: TemplateAssets;
+  /**
+   * 16:9 "video frames" print layout: the page is laid out as the lecture-video renderer
+   * does it (853.33×480 CSS px per frame, one `.slide-page` per video page, the same
+   * greedy block split and `<div class="pagebreak">` rule as `render_slide_pngs.js`), and
+   * `@page` is set to that size so Ctrl+P prints one frame per sheet. Export only.
+   */
+  printFrames?: boolean;
+  /**
+   * Source line the preview should centre on after (re)loading — the editor's centre line.
+   * Replaces the pixel-based `scrollY` restore, which lands on the wrong text whenever a
+   * block above changed height (lazy image, Mermaid, an edited comment).
+   */
+  anchorLine?: number;
 }
 
 const RENDER_BODY = `
@@ -98,12 +111,20 @@ if (window.hljs) {
  * (no template literals / backticks) so it can be embedded in this module's own template
  * string without `${…}` collisions.
  */
-function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): string {
+function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean, printFrames: boolean): string {
   return `<script nonce="${nonce}">
 (function () {
   "use strict";
   var IS_PREVIEW = ${isPreview ? "true" : "false"};
   var SCROLL_SYNC = ${scrollSync ? "true" : "false"};
+  var PRINT_FRAMES = ${printFrames ? "true" : "false"};
+  // One lecture-video frame in CSS px: render_slide_pngs.js lays the deck out at
+  // 1280x720 / zoom 1.5 = 853.33x480 and rasterises at deviceScaleFactor 4.5 -> 3840x2160.
+  var FRAME_W = 2560 / 3, FRAME_H = 480;
+  // How long after a (re)load the preview stays quiet towards the editor: images decode,
+  // Mermaid renders and the anchor is re-applied inside this window, and any of those emits
+  // scroll events that must NOT be reported as the user scrolling.
+  var SETTLE_MS = 800;
 
   var vscode = null;
   if (IS_PREVIEW) { try { vscode = acquireVsCodeApi(); } catch (e) { vscode = null; } }
@@ -128,12 +149,22 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
     ? st.theme : (root.getAttribute('data-theme') || 'dark');
   var mode = (st.mode === 'slide') ? 'slide' : (root.getAttribute('data-mode') || 'document');
   var slideIndex = (typeof st.slideIndex === 'number') ? st.slideIndex : 0;
+  // Source line to centre on after this (re)load: the editor's centre line stamped by the
+  // extension wins; the line the preview itself last showed is the fallback.
+  var anchorAttr = parseInt(root.getAttribute('data-anchor-line') || '', 10);
+  var anchorLine = !isNaN(anchorAttr) ? anchorAttr
+    : (typeof st.anchorLine === 'number' ? st.anchorLine : null);
+  var userScrolled = false; // set by wheel/touch/keys — after that the anchor is not re-applied
+  var slideScroll = (st.slideScroll && typeof st.slideScroll === 'object') ? st.slideScroll : {};
+  var mermaidH = (st.mermaidH && typeof st.mermaidH === 'object') ? st.mermaidH : {};
+  if (PRINT_FRAMES) mode = 'slide';
 
   // ---- theme ----
   function applyTheme(t) {
     theme = (t === 'light' || t === 'dark') ? t : 'dark';
     root.setAttribute('data-theme', theme);
     writeState({ theme: theme });
+    post({ type: 'uiState', mode: mode, theme: theme });
     syncMenu();
     runMermaid(afterRender); // recolour diagrams for the new theme (+ refresh deck/line map)
   }
@@ -173,17 +204,44 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
       if (!mermaidStashed) el.setAttribute('data-src', el.textContent);
       else el.textContent = el.getAttribute('data-src') || el.textContent;
       el.removeAttribute('data-processed');
+      // Reserve the height this diagram had last time (keyed by its source) so the blocks
+      // below it do not jump when the SVG arrives — the same layout-shift the lazy images had.
+      var known = mermaidH[hashStr(el.getAttribute('data-src') || '')];
+      if (typeof known === 'number' && known > 0) el.style.minHeight = known + 'px';
     }
     mermaidStashed = true;
+    var remember = function () {
+      var changed = false;
+      for (var q = 0; q < nodes.length; q++) {
+        var h = nodes[q].offsetHeight, key = hashStr(nodes[q].getAttribute('data-src') || '');
+        if (h > 0 && mermaidH[key] !== h) { mermaidH[key] = h; changed = true; }
+      }
+      if (changed) writeState({ mermaidH: mermaidH });
+    };
     try {
       window.mermaid.initialize({
         startOnLoad: false, securityLevel: 'strict', theme: 'base',
         themeVariables: mermaidThemeVars()
       });
-      Promise.resolve(window.mermaid.run({ nodes: Array.prototype.slice.call(nodes) }))
-        .then(function () { themeDiagrams(); if (done) done(); },
+      // Wait for webfonts before rendering. Mermaid sizes each node box from a measurement
+      // of its label, and at DOMContentLoaded the 'Presentation' face is not there yet — the
+      // fallback measures CJK wider, so the box comes out too big and the glyphs, drawn later
+      // in the real face, sit left with all the slack on the right (measured: box 255 /
+      // label 195 / ink 154 -> padding 30 left, 70 right; after fonts, 214 / 154 / 154 ->
+      // 30 / 30). The same over-measure pushes a label past wrappingWidth and adds a phantom
+      // line. Fonts are inlined as base64 here, so the wait costs essentially nothing.
+      var fontsReady = (document.fonts && document.fonts.ready) || Promise.resolve();
+      Promise.resolve(fontsReady).catch(function () {})
+        .then(function () { return window.mermaid.run({ nodes: Array.prototype.slice.call(nodes) }); })
+        .then(function () { themeDiagrams(); remember(); if (done) done(); },
               function () { if (done) done(); });
     } catch (e) { if (done) done(); }
+  }
+  // Small stable string hash (djb2) for the per-diagram height cache.
+  function hashStr(s) {
+    var h = 5381;
+    for (var i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+    return 'm' + (h >>> 0).toString(36);
   }
   // Repaint every diagram in the page palette. Mermaid writes a document's own
   // 'classDef … fill:#e3f2fd' as an INLINE style with !important, which no stylesheet rule
@@ -217,7 +275,13 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
   }
   // After (re-)rendering diagrams: refresh the scroll-sync line map and, in slide mode,
   // rebuild the deck so it clones the freshly rendered SVGs.
-  function afterRender() { buildMap(); if (mode === 'slide') buildDeck(); }
+  function afterRender() {
+    if (PRINT_FRAMES) { buildFrames(); return; }
+    buildMap();
+    if (mode === 'slide') buildDeck();
+    settle();
+    restoreAnchor();
+  }
 
   // ---- auto-hiding scrollbar (thumb tinted only while the element scrolls) ----
   function autoHide(el) {
@@ -271,7 +335,15 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
       slides = [only];
     }
     document.body.appendChild(deck);
-    for (var k = 0; k < slides.length; k++) autoHide(slides[k]);
+    for (var k = 0; k < slides.length; k++) {
+      autoHide(slides[k]);
+      (function (idx, el) {
+        el.addEventListener('scroll', function () {
+          slideScroll[String(idx)] = el.scrollTop;
+          writeState({ slideScroll: slideScroll });
+        }, { passive: true });
+      })(k, slides[k]);
+    }
     // Map each slide to its source-line range for editor⇄preview slide sync: start = the
     // slide's smallest data-source-line; heading = its first H1–H6 line (else the start).
     slideLines = slides.map(function (sec) {
@@ -297,7 +369,13 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
       slides[n].classList.toggle('active', n === slideIndex);
     }
     writeState({ slideIndex: slideIndex });
-    if (slides[slideIndex]) slides[slideIndex].scrollTop = 0;
+    var el = slides[slideIndex];
+    if (el) {
+      // A re-render rebuilds the deck: put the slide back where it was scrolled (the state
+      // is cleared by gotoSlide, so user navigation still starts each slide at the top).
+      var keep = slideScroll[String(slideIndex)];
+      el.scrollTop = (typeof keep === 'number') ? keep : 0;
+    }
   }
   // Preview → editor (slide mode): centre the current slide's heading line in the editor.
   function postSlideToEditor() {
@@ -306,7 +384,7 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
     if (s) post({ type: 'revealLine', line: s.heading });
   }
   // User navigation shows the slide AND syncs the editor; editor-driven changes stay silent.
-  function gotoSlide(i) { showSlide(i); postSlideToEditor(); }
+  function gotoSlide(i) { slideScroll = {}; writeState({ slideScroll: slideScroll }); showSlide(i); postSlideToEditor(); }
   function nextSlide() { gotoSlide(slideIndex + 1); }
   function prevSlide() { gotoSlide(slideIndex - 1); }
   // Editor → preview (slide mode): show the slide whose source range holds the given line.
@@ -321,10 +399,12 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
 
   // ---- view mode ----
   function applyMode(m) {
+    if (PRINT_FRAMES) return; // the frames layout is a fixed slide view
     mode = (m === 'slide') ? 'slide' : 'document';
     root.setAttribute('data-mode', mode);
     if (mode === 'slide') buildDeck(); else teardownDeck();
     writeState({ mode: mode });
+    post({ type: 'uiState', mode: mode, theme: theme });
     syncMenu();
   }
   function toggleMode() { applyMode(mode === 'slide' ? 'document' : 'slide'); }
@@ -425,6 +505,37 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
   var lineMap = [];
   var suppressPostUntil = 0;
   var rafPending = false;
+  // Quiet window towards the editor (see SETTLE_MS). Extended, never shortened.
+  function settle() { suppressPostUntil = Math.max(suppressPostUntil, Date.now() + SETTLE_MS); }
+  // True once every image has its final box — before that the line map is wrong below them.
+  function imagesSettled() {
+    var imgs = document.images;
+    for (var i = 0; i < imgs.length; i++) { if (!imgs[i].complete) return false; }
+    return true;
+  }
+  // Re-centre the anchor line unless the user has taken over the scroll position.
+  function restoreAnchor() {
+    if (!IS_PREVIEW || !SCROLL_SYNC || mode !== 'document') return;
+    if (userScrolled || anchorLine === null) return;
+    buildMap();
+    scrollToLine(anchorLine);
+  }
+  // Each image that is still loading re-applies the anchor once its box is known.
+  function watchImages() {
+    var imgs = document.images;
+    for (var i = 0; i < imgs.length; i++) {
+      if (imgs[i].complete) continue;
+      imgs[i].addEventListener('load', function () { settle(); buildMap(); restoreAnchor(); }, { once: true });
+      imgs[i].addEventListener('error', function () { settle(); buildMap(); }, { once: true });
+    }
+  }
+  function markUserScroll() { userScrolled = true; }
+  window.addEventListener('wheel', markUserScroll, { passive: true });
+  window.addEventListener('touchmove', markUserScroll, { passive: true });
+  window.addEventListener('keydown', function (e) {
+    if (mode !== 'document') return;
+    if (/^(ArrowUp|ArrowDown|PageUp|PageDown|Home|End| )$/.test(e.key)) userScrolled = true;
+  });
   // Each entry is a block's source-line span [s, e] and its pixel span [top, bottom].
   function buildMap() {
     lineMap = [];
@@ -460,7 +571,7 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
   // Editor -> preview: place that source line at the viewport's vertical CENTRE.
   function scrollToLine(line) {
     if (!lineMap.length) return;
-    suppressPostUntil = Date.now() + 250;
+    suppressPostUntil = Math.max(suppressPostUntil, Date.now() + 250);
     window.scrollTo(0, pixelForLine(line) - window.innerHeight / 2);
   }
   // Preview -> editor: the source line at the viewport's vertical CENTRE. Inside a block:
@@ -482,13 +593,20 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
     return prev ? prev.e : 0;
   }
   function onScroll() {
-    writeState({ scrollY: window.scrollY });
-    if (!IS_PREVIEW || !SCROLL_SYNC || mode === 'slide') return;
-    if (Date.now() < suppressPostUntil || rafPending) return;
+    if (!IS_PREVIEW || !SCROLL_SYNC || mode === 'slide') { writeState({ scrollY: window.scrollY }); return; }
+    // Only a scroll the user made moves the anchor; layout shifts and our own re-centring
+    // never do (they would otherwise be reported back as a new position — the editor jump).
+    if (Date.now() < suppressPostUntil || rafPending || !imagesSettled()) {
+      writeState({ scrollY: window.scrollY });
+      return;
+    }
     rafPending = true;
     requestAnimationFrame(function () {
       rafPending = false;
-      post({ type: 'revealLine', line: currentLine() });
+      var line = currentLine();
+      anchorLine = line;
+      writeState({ scrollY: window.scrollY, anchorLine: line });
+      post({ type: 'revealLine', line: line });
     });
   }
 
@@ -497,9 +615,13 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
     var msg = e.data || {};
     if (msg.type === 'scrollToLine') {
       if (!IS_PREVIEW || !SCROLL_SYNC) return;
+      anchorLine = msg.line; userScrolled = false;
+      writeState({ anchorLine: msg.line });
       if (mode === 'slide') { activateSlideForLine(msg.line); return; }
       if (!lineMap.length) buildMap();
       scrollToLine(msg.line);
+    } else if (msg.type === 'update') {
+      if (typeof msg.articleHtml === 'string') applyUpdate(msg.articleHtml, msg.anchorLine);
     } else if (msg.type === 'setTheme') {
       applyTheme(msg.theme === 'toggle' ? (theme === 'dark' ? 'light' : 'dark') : msg.theme);
     } else if (msg.type === 'setMode') {
@@ -508,24 +630,235 @@ function clientScript(isPreview: boolean, nonce: string, scrollSync: boolean): s
   });
 
   // ---- init ----
-  function init() {
+  // KaTeX + highlight.js over the current article (Mermaid runs separately, themed).
+  function renderBody() {
     ${RENDER_BODY}
+  }
+  // In-place update from the extension: swap the article, re-run the renderers on the new
+  // nodes, refresh the map/deck/frames — the window and its scroll position stay. This is
+  // what makes typing feel stable: no reload, no state restore, no flicker.
+  function applyUpdate(articleHtml, newAnchor) {
+    var article = document.querySelector('article');
+    if (!article) return;
+    settle();
+    article.innerHTML = articleHtml;
+    renderBody();
+    mermaidStashed = false; // fresh <pre class="mermaid"> nodes carry their source as text
+    if (typeof newAnchor === 'number') anchorLine = newAnchor;
+    watchImages();
+    runMermaid(afterRender); // -> buildMap / buildDeck / buildFrames, settle, restoreAnchor
+    buildMap();
+    restoreAnchor();
+  }
+  function init() {
+    renderBody();
     root.setAttribute('data-theme', theme);
+    if (PRINT_FRAMES) {
+      // Video-frame print layout: no deck, no sync, no scroll chrome — just the frames.
+      root.setAttribute('data-mode', 'slide');
+      disablePrintRules();
+      runMermaid(afterRender); // -> buildFrames() once diagrams (if any) are in
+      return;
+    }
     autoHide(window);
     window.addEventListener('scroll', onScroll, { passive: true });
     window.addEventListener('resize', buildMap);
     applyMode(mode); // builds the deck when starting in slide mode
+    settle();
     runMermaid(afterRender); // render diagrams in the active theme, then refresh deck/map
     buildMap();
     if (mode === 'document') {
-      var prev = readState();
-      if (prev && typeof prev.scrollY === 'number') window.scrollTo(0, prev.scrollY);
+      if (IS_PREVIEW && SCROLL_SYNC && anchorLine !== null) {
+        restoreAnchor(); // by source line: survives height changes above the anchor
+      } else {
+        var prev = readState();
+        if (prev && typeof prev.scrollY === 'number') window.scrollTo(0, prev.scrollY);
+      }
     }
+    watchImages();
+    post({ type: 'uiState', mode: mode, theme: theme });
+  }
+
+  // ================= 16:9 video-frame print layout (export only) =================
+  // Mirrors render_slide_pngs.js: one .slide-page per video page, the .slide inside laid
+  // out exactly as the deck's slide mode (same class, same CSS, fixed to FRAME_W x FRAME_H),
+  // images capped at 62% of the frame height (--fit-images 62), pages split greedily at
+  // block boundaries when a block's bottom passes the frame (plus <div class="pagebreak">),
+  // later blocks hidden and the page scrolled to its first block — the video frame itself.
+  var framesEl = null;
+  function disablePrintRules() {
+    // The stylesheet's @media print / @page rules describe the A4 document printout
+    // (light palette, pt sizes, 33vh figures). Frames must print as the SCREEN layout the
+    // video was rendered from, so drop those rules — except our own frames <style>.
+    var sheets = document.styleSheets;
+    for (var i = 0; i < sheets.length; i++) {
+      var sh = sheets[i];
+      if (sh.ownerNode && sh.ownerNode.id === 'frames-style') continue;
+      var rules;
+      try { rules = sh.cssRules; } catch (e) { continue; }
+      if (!rules) continue;
+      for (var r = rules.length - 1; r >= 0; r--) {
+        var rule = rules[r];
+        var isPrintMedia = rule.media && /print/.test(rule.media.mediaText);
+        var isPage = (window.CSSPageRule && rule instanceof CSSPageRule);
+        if (isPrintMedia || isPage) { try { sh.deleteRule(r); } catch (e) {} }
+      }
+    }
+  }
+  function slideGroups() {
+    var article = document.querySelector('article');
+    if (!article) return [];
+    var groups = [[]];
+    var kids = Array.prototype.slice.call(article.childNodes);
+    for (var i = 0; i < kids.length; i++) {
+      var node = kids[i];
+      var isSep = node.nodeType === 1 && node.classList && node.classList.contains('slide-sep');
+      if (isSep) groups.push([]); else groups[groups.length - 1].push(node);
+    }
+    // Same emptiness rule as buildDeck(): text, or an image / svg / table.
+    return groups.filter(function (g) {
+      var probe = document.createElement('section');
+      for (var k = 0; k < g.length; k++) probe.appendChild(g[k].cloneNode(true));
+      return probe.textContent.trim().length > 0 || probe.querySelector('img, svg, table');
+    });
+  }
+  function loadAllImages() {
+    var imgs = Array.prototype.slice.call(document.images);
+    return Promise.all(imgs.map(function (im) {
+      im.loading = 'eager';
+      var loaded = (im.complete && im.naturalWidth > 0) ? Promise.resolve()
+        : new Promise(function (res) {
+            im.addEventListener('load', res, { once: true });
+            im.addEventListener('error', res, { once: true });
+            setTimeout(res, 15000);
+          });
+      return loaded.then(function () {
+        var dec = im.decode ? im.decode().catch(function () {}) : Promise.resolve();
+        return Promise.race([dec, new Promise(function (r) { setTimeout(r, 5000); })]);
+      });
+    }));
+  }
+  function makePage(group) {
+    var pg = document.createElement('section');
+    pg.className = 'slide-page';
+    var sl = document.createElement('div');
+    sl.className = 'slide active';
+    var wrap = document.createElement('div');
+    wrap.className = 'pg-scroll';
+    for (var i = 0; i < group.length; i++) wrap.appendChild(group[i].cloneNode(true));
+    sl.appendChild(wrap);
+    pg.appendChild(sl);
+    return pg;
+  }
+  function buildFrames() {
+    if (framesEl && framesEl.parentNode) framesEl.parentNode.removeChild(framesEl);
+    framesEl = document.createElement('div');
+    framesEl.className = 'frames';
+    document.body.appendChild(framesEl);
+    document.body.removeAttribute('data-frames-ready');
+    var groups = slideGroups();
+    loadAllImages().then(function () {
+      for (var n = 0; n < groups.length; n++) {
+        var pg = makePage(groups[n]);
+        framesEl.appendChild(pg);
+        var sl = pg.firstChild, wrap = sl.firstChild;
+        void sl.offsetHeight;
+        var H = sl.clientHeight;
+        var blocks = Array.prototype.slice.call(wrap.children);
+        // offsetTop is measured from the .slide (position:absolute -> offsetParent) padding
+        // edge, exactly as render_slide_pngs.js measures it against the deck's .slide.
+        var tops = blocks.map(function (b) { return b.offsetTop; });
+        var bots = blocks.map(function (b, i) { return tops[i] + b.offsetHeight; });
+        var forced = blocks.map(function (b) { return !!(b.classList && b.classList.contains('pagebreak')); });
+        var pages = [], start = 0, first = 0;
+        for (var i = 0; i < blocks.length; i++) {
+          if (i > first && (forced[i] || bots[i] - start > H)) {
+            pages.push({ y: start, last: i - 1, first: first });
+            first = i; start = tops[i];
+          }
+        }
+        pages.push({ y: start, last: blocks.length - 1, first: first });
+        // The video sets scrollTop = y on a real scroller, and a scroller clamps to
+        // scrollHeight - clientHeight: a last page shorter than the frame therefore shows the
+        // slide bottom-aligned, with the end of the previous page still visible at the top.
+        // Reproduce that clamp — it is what the frames look like.
+        var maxScroll = Math.max(0, sl.scrollHeight - sl.clientHeight);
+        for (var k = 0; k < pages.length; k++) {
+          var el = (k === 0) ? pg : pg.cloneNode(true);
+          if (k > 0) framesEl.appendChild(el);
+          el.setAttribute('data-slide', String(n + 1));
+          el.setAttribute('data-page', String(k + 1));
+          el.setAttribute('data-pages', String(pages.length));
+          var w = el.firstChild.firstChild;
+          var bl = Array.prototype.slice.call(w.children);
+          for (var j = 0; j < bl.length; j++) bl[j].style.visibility = (j > pages[k].last) ? 'hidden' : '';
+          // "scrollTop = y" of the video, done as a transform so the printed page keeps it.
+          var yEff = Math.min(pages[k].y, maxScroll);
+          // A single block taller than the frame (long code / table): the video renderer
+          // has no --autofit here and cuts it. The printout instead starts the page at that
+          // block (no scroll clamp) and scales it down about the top-left corner until the
+          // page's blocks fit, recording the factor in data-fit.
+          var pageH = bots[pages[k].last] - pages[k].y;
+          var fit = 1;
+          if (pageH > H) { fit = H / pageH; yEff = pages[k].y; }
+          var tf = yEff ? 'translateY(' + (-yEff) + 'px)' : '';
+          if (fit < 1) {
+            // Scale about the frame's top-left, not the wrapper's: the wrapper sits below
+            // the slide's top padding, and scaling about its own corner would leave the
+            // block that much lower than the frame edge.
+            w.style.transformOrigin = '0 ' + (-w.offsetTop) + 'px';
+            tf = 'scale(' + fit.toFixed(4) + ') ' + tf;
+            el.setAttribute('data-fit', fit.toFixed(3));
+          }
+          w.style.transform = tf;
+        }
+      }
+      document.body.setAttribute('data-frames-ready', '1');
+    });
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 }());
 </script>`;
+}
+
+/**
+ * Styles for the 16:9 video-frame print layout. Everything the video renderer expressed in
+ * viewport units (`.slide` padding 6vh/7vw/12vh, `--fit-images 62` → `max-height: 62vh`,
+ * `.figure img` 86vh) is fixed here in px at the 853.33×480 frame, so the page looks the
+ * same on screen (any window size) and on paper (`@page` = one frame). The client deletes
+ * the stylesheet's own `@media print` / `@page` rules in this mode — see `disablePrintRules`.
+ */
+function framesStyleTag(nonceAttr: string): string {
+  const W = "853.333px", H = "480px";
+  return `<style id="frames-style"${nonceAttr}>
+@page { size: ${W} ${H}; margin: 0; }
+:root[data-print="frames"] body { overflow: auto !important; margin: 0; background: #3a3a3a; }
+:root[data-print="frames"] main {
+  position: absolute; left: 0; top: 0; width: ${W}; visibility: hidden; pointer-events: none;
+}
+:root[data-print="frames"] .deck { display: none !important; }
+.frames { display: flex; flex-direction: column; align-items: center; gap: 24px; padding: 24px 0; }
+.frames .slide-page {
+  position: relative; width: ${W}; height: ${H}; overflow: hidden;
+  background: var(--bg); color: var(--ink); box-shadow: 0 0 0 1px #000;
+}
+.frames .slide-page > .slide {
+  display: block; position: absolute; inset: 0;
+  overflow-x: hidden; overflow-y: auto;
+  padding: 28.8px 59.733px 57.6px; /* = 6vh clamp(28px, 7vw, 160px) 12vh at 853.33x480 */
+}
+.frames .pg-scroll > :first-child { margin-top: 0; } /* the deck's .slide > :first-child */
+.frames .slide img { max-height: 297.6px; width: auto; height: auto; object-fit: contain; } /* 62vh */
+@media print {
+  :root[data-print="frames"] body { background: transparent; }
+  .frames { display: block; padding: 0; gap: 0; }
+  .frames .slide-page { box-shadow: none; break-after: page; page-break-after: always; margin: 0; }
+  .frames .slide-page:last-child { break-after: auto; page-break-after: auto; }
+  .frames, .frames * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .frames .slide-page > .slide { overflow: hidden; }
+}
+</style>`;
 }
 
 /** The CDN origin, listed only when an asset still comes from there. */
@@ -613,6 +946,8 @@ export function buildHtmlDocument(options: TemplateOptions): string {
     theme = "dark",
     mode = "document",
     assets = CDN_ASSETS,
+    printFrames = false,
+    anchorLine,
   } = options;
   const isPreview = Boolean(cspSource);
 
@@ -626,7 +961,14 @@ export function buildHtmlDocument(options: TemplateOptions): string {
 
   const nonceAttr = nonce ? ` nonce="${nonce}"` : "";
   const katexScript = scriptTag(assets.katexJs, nonceAttr);
-  const renderScript = clientScript(isPreview, nonce ?? "", scrollSync);
+  const renderScript = clientScript(isPreview, nonce ?? "", scrollSync, printFrames);
+  const framesStyle = printFrames ? `
+${framesStyleTag(nonceAttr)}` : "";
+  const rootAttrs =
+    (printFrames ? ' data-print="frames"' : "") +
+    (typeof anchorLine === "number" && Number.isFinite(anchorLine)
+      ? ` data-anchor-line="${Math.max(0, Math.round(anchorLine))}"`
+      : "");
 
   // Load highlight.js only when a fenced code block with a language is present. Token COLORS
   // come from preview.css (theme-aware, light/dark) — we deliberately do NOT load a stock
@@ -641,7 +983,7 @@ export function buildHtmlDocument(options: TemplateOptions): string {
   const mermaidScript = hasMermaid ? `\n${scriptTag(assets.mermaidJs, nonceAttr)}` : "";
 
   return `<!doctype html>
-<html lang="ko" data-theme="${theme}" data-mode="${mode}">
+<html lang="ko" data-theme="${theme}" data-mode="${printFrames ? "slide" : mode}"${rootAttrs}>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -650,7 +992,7 @@ ${styleTag(assets.katexCss, nonceAttr)}
 <style${nonceAttr}>
 ${assets.fontCss}
 ${css}
-</style>
+</style>${framesStyle}
 ${katexScript}${hljsScript}${mermaidScript}
 ${renderScript}
 </head>

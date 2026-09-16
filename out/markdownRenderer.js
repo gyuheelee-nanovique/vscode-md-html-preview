@@ -30,6 +30,7 @@ exports.addSourceLine = addSourceLine;
 exports.stripHtmlComments = stripHtmlComments;
 exports.commentLineMask = commentLineMask;
 exports.markdownToArticleHtml = markdownToArticleHtml;
+exports.addSlideNumbers = addSlideNumbers;
 const htmlEscape_1 = require("./htmlEscape");
 const citations_1 = require("./transforms/citations");
 const math_1 = require("./transforms/math");
@@ -543,8 +544,11 @@ function markdownToArticleHtml(md, options) {
             const src = resolveImage(rel);
             if (src) {
                 renderedImages += 1;
+                const dims = options.imageSize ? options.imageSize(rel) : null;
+                const sizeAttrs = dims ? ` width="${dims.width}" height="${dims.height}"` : "";
+                const loading = options.eagerImages ? "eager" : "lazy";
                 pushBlock('<figure class="figure">' +
-                    `<img src="${(0, htmlEscape_1.escapeAttr)(src)}" alt="${(0, htmlEscape_1.escapeAttr)(alt)}" loading="lazy" decoding="async">` +
+                    `<img src="${(0, htmlEscape_1.escapeAttr)(src)}" alt="${(0, htmlEscape_1.escapeAttr)(alt)}"${sizeAttrs} loading="${loading}" decoding="async">` +
                     "</figure>");
             }
             else {
@@ -693,11 +697,39 @@ function markdownToArticleHtml(md, options) {
     const finalBlocks = referencesIndex !== null
         ? (0, references_1.wrapReferences)(blocks, referencesIndex, openReferences, withLines ? referencesLine : undefined)
         : blocks;
+    const numbered = options.slideNumbers
+        ? addSlideNumbers(finalBlocks, options.slideNumberStart ?? 1)
+        : finalBlocks;
     return {
-        articleHtml: finalBlocks.join("\n\n"),
+        articleHtml: numbered.join("\n\n"),
         imageCount,
         renderedImages,
         missingImages,
     };
+}
+/** `<hr class="slide-sep">`, possibly carrying a `data-source-line` stamp. */
+const SLIDE_SEP_RE = /^<hr class="slide-sep"[ >]/;
+/**
+ * Insert a `.slide-no` badge before the first block and after every slide separator.
+ * The client-side slide mode groups blocks between `.slide-sep` nodes, so the badge
+ * becomes the first child of each `.slide`; document mode shows it as a small
+ * right-aligned label above the slide's heading. Numbering counts separators only, so
+ * it matches the `---`-split numbering the TTS scripts and the narration use.
+ */
+function addSlideNumbers(blocks, start) {
+    const total = blocks.filter((b) => SLIDE_SEP_RE.test(b)).length + 1;
+    const last = start + total - 1;
+    const badge = (n) => `<div class="slide-no" aria-hidden="true" data-slide="${n}">슬라이드 ${n}` +
+        `<span class="slide-no-total"> / ${last}</span></div>`;
+    const out = [badge(start)];
+    let n = start;
+    for (const b of blocks) {
+        out.push(b);
+        if (SLIDE_SEP_RE.test(b)) {
+            n += 1;
+            out.push(badge(n));
+        }
+    }
+    return out;
 }
 //# sourceMappingURL=markdownRenderer.js.map

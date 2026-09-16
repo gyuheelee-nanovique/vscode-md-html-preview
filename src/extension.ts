@@ -33,6 +33,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // the manager falls back to the document the preview is bound to.
     vscode.commands.registerCommand("mdHtmlPreview.exportHtml", () => manager.exportHtml()),
     vscode.commands.registerCommand("mdHtmlPreview.print", () => manager.print()),
+    vscode.commands.registerCommand("mdHtmlPreview.printSlides", () => manager.printSlides()),
     vscode.commands.registerCommand("mdHtmlPreview.toggleSlideMode", () => manager.toggleSlideMode()),
     vscode.commands.registerCommand("mdHtmlPreview.toggleTheme", () => manager.toggleTheme())
   );

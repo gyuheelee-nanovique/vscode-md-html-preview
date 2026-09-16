@@ -10,3 +10,4 @@ node_modules/
 #
 # out/ is also tracked, which predates the .vsix distribution and is no longer required —
 # the .vsix carries its own compiled copy. Kept for now so old checkouts keep working.
+_bak_*/
