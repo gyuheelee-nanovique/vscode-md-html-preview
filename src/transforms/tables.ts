@@ -22,14 +22,53 @@ const TABLE_SEPARATOR_RE = /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?$/;
 
 export type ColumnAlign = "left" | "center" | "right" | null;
 
-/** Split a pipe row into trimmed cells, dropping all leading/trailing pipes. */
+/**
+ * Split a pipe row into trimmed cells, dropping all leading/trailing pipes.
+ *
+ * A `|` is a cell boundary only OUTSIDE inline math and inline code: `$\phi\big|_{\partial
+ * \Omega}$`, `$\left.\dfrac{\partial\phi}{\partial n}\right|_{\partial\Omega}$` and
+ * `\|x\|` stay inside their cell (a plain `.split("|")` turned each into extra columns).
+ * Outside math, the CommonMark escape `\|` yields a literal pipe.
+ */
 function splitRow(line: string): string[] {
-  return line
-    .trim()
-    .replace(/^\|+/, "")
-    .replace(/\|+$/, "")
-    .split("|")
-    .map((c) => c.trim());
+  const s = line.trim();
+  const cells: string[] = [];
+  let cur = "";
+  let inMath = false; // between unescaped `$` … `$` (or `$$` … `$$`)
+  let inCode = false; // between backticks
+  let dollars = 0;    // 1 or 2: how the current math span was opened
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (ch === "\\" && i + 1 < s.length) {
+      // Escaped character: outside math `\|` is a literal pipe; inside math keep the
+      // backslash (it is LaTeX: `\|`, `\$`, …).
+      if (!inMath && !inCode && s[i + 1] === "|") { cur += "|"; i += 1; continue; }
+      cur += ch + s[i + 1];
+      i += 1;
+      continue;
+    }
+    if (ch === "`" && !inMath) { inCode = !inCode; cur += ch; continue; }
+    if (ch === "$" && !inCode) {
+      if (!inMath) {
+        dollars = s[i + 1] === "$" ? 2 : 1;
+        inMath = true;
+        cur += dollars === 2 ? "$$" : "$";
+        i += dollars - 1;
+        continue;
+      }
+      if (dollars === 2 && s[i + 1] === "$") { inMath = false; cur += "$$"; i += 1; continue; }
+      if (dollars === 1) { inMath = false; cur += "$"; continue; }
+      cur += ch;
+      continue;
+    }
+    if (ch === "|" && !inMath && !inCode) { cells.push(cur); cur = ""; continue; }
+    cur += ch;
+  }
+  cells.push(cur);
+  // Drop the empty cells that leading / trailing pipes produce (`| a | b |` -> a, b).
+  if (cells.length && cells[0].trim() === "") cells.shift();
+  if (cells.length && cells[cells.length - 1].trim() === "") cells.pop();
+  return cells.map((c) => c.trim());
 }
 
 /** Per-column alignment encoded by the separator row's colons. */

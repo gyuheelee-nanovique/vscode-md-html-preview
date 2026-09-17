@@ -27,6 +27,8 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   default; configurable).
 - **Docling tables** — pipe tables, table captions (`표 N …`), and the special
   liposome "simulation" table are rendered with horizontal scrolling for wide tables.
+  A `|` inside inline math or code (`$\phiig|_{\partial\Omega}$`, `\|x\|`) stays in its
+  cell; outside math, `\|` is a literal pipe.
 - **Plain citations** — `[text](url)` links are stripped to plain text by default to
   match the paper pipeline (toggle with `mdHtmlPreview.plainCitations`).
 - **Captions and loose lists** — a block that is one `<small>…</small>` wrapper renders
