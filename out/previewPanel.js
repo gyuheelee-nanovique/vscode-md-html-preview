@@ -272,6 +272,8 @@ class PreviewManager {
             // Video frames carry no badge: the lecture renderer never turns slide numbers on.
             slideNumbers: frames ? false : cfg.showSlideNumbers,
             eagerImages: frames, // the frame split needs every image's box before it measures
+            richSmall: true,
+            looseOrderedLists: true,
         });
         const html = (0, htmlTemplate_1.buildHtmlDocument)({
             title: path.basename(uri.fsPath || uri.path),
@@ -626,6 +628,8 @@ class PreviewManager {
             // scroll-sync land on the wrong text and then yank the editor along):
             eagerImages: true,
             imageSize: this.makeImageSize(baseDir),
+            richSmall: true,
+            looseOrderedLists: true,
         };
         const result = (0, markdownRenderer_1.markdownToArticleHtml)(doc.getText(), options);
         const css = this.cssText + this.deckCss(this.sourceUri);

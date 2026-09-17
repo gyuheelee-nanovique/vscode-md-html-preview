@@ -53,6 +53,8 @@ const SAFE_HREF_RE = /^(https?:|mailto:|#|\/|\.)/i;
 // A block that begins with an HTML tag (`<div …>`, `<table>`, page-break divs, …) is
 // passed through verbatim as a raw HTML block, matching CommonMark HTML blocks.
 const HTML_BLOCK_RE = /^<\/?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^>]*)?\/?>/;
+// A block that is exactly one <small …>…</small> wrapper (multi-line allowed, nothing after).
+const SMALL_BLOCK_RE = /^<small(\s[^>]*)?>([\s\S]*?)<\/small>$/i;
 // Inline HTML tags allowed to pass through un-escaped (no-attribute, safe subset).
 const INLINE_HTML_RE = /&lt;(\/?(?:br|sub|sup|u|s|mark|small|kbd|del|ins|wbr|abbr|cite|q)\s*\/?)&gt;/gi;
 // A source line forcing a hard line break (`<br>`): trailing 2+ spaces or a backslash.
@@ -623,11 +625,28 @@ function markdownToArticleHtml(md, options) {
         if (!inReferences && ORDERED_RE.test(stripped)) {
             const items = [];
             let m;
-            while (i < lines.length && (m = ORDERED_RE.exec(lines[i].trim())) !== null) {
+            const firstNo = parseInt(stripped, 10);
+            while (i < lines.length) {
+                m = ORDERED_RE.exec(lines[i].trim());
+                if (m === null) {
+                    // Loose list: blank line(s) followed by another numbered item continue the list —
+                    // otherwise "1.\n\n2.\n\n3." became three lists and displayed as 1. 1. 1.
+                    if (options.looseOrderedLists && lines[i].trim() === "") {
+                        let j = i;
+                        while (j < lines.length && lines[j].trim() === "")
+                            j += 1;
+                        if (j < lines.length && !inReferences && ORDERED_RE.test(lines[j].trim())) {
+                            i = j;
+                            continue;
+                        }
+                    }
+                    break;
+                }
                 items.push(`<li>${renderInline(m[1].trim())}</li>`);
                 i += 1;
             }
-            pushBlock(`<ol>${items.join("")}</ol>`);
+            const startAttr = options.looseOrderedLists && Number.isFinite(firstNo) && firstNo !== 1 ? ` start="${firstNo}"` : "";
+            pushBlock(`<ol${startAttr}>${items.join("")}</ol>`);
             continue;
         }
         // Reference list line
@@ -643,7 +662,15 @@ function markdownToArticleHtml(md, options) {
                 htmlLines.push(lines[i]);
                 i += 1;
             }
-            pushBlock(htmlLines.join("\n"));
+            const raw = htmlLines.join("\n");
+            // A caption / credit line: one <small> wrapper around Markdown text. Render its
+            // inside like a paragraph (math, emphasis, code) instead of passing it through raw.
+            const small = options.richSmall ? SMALL_BLOCK_RE.exec(raw.trim()) : null;
+            if (small) {
+                pushBlock(`<small${small[1] ?? ""}>${renderInline(small[2].replace(/\s*\n\s*/g, " ").trim())}</small>`);
+                continue;
+            }
+            pushBlock(raw);
             continue;
         }
         // Paragraph (with docling table-caption lookahead)

@@ -29,6 +29,11 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   liposome "simulation" table are rendered with horizontal scrolling for wide tables.
 - **Plain citations** — `[text](url)` links are stripped to plain text by default to
   match the paper pipeline (toggle with `mdHtmlPreview.plainCitations`).
+- **Captions and loose lists** — a block that is one `<small>…</small>` wrapper renders
+  its inside as Markdown (math, emphasis, code), and numbered items separated by blank
+  lines form one list (`1. 2. 3.`, with `start` honoured). Both are renderer options
+  (`richSmall`, `looseOrderedLists`) that the preview and export turn on; the lecture-video
+  renderer leaves them off so existing frames stay byte-identical.
 - **Clickable web addresses** — bare URLs (`https://…`, `<https://…>`) become clickable
   links in the live preview, the saved standalone HTML, and the printed PDF, even while
   citations stay plain (toggle with `mdHtmlPreview.autolinkUrls`).
