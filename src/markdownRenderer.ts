@@ -302,6 +302,7 @@ export function inline(rawText: string, keepLinks: boolean, autolinkUrls = true)
  * deliberately NOT break conditions here: they only start a block at the top of the
  * parse loop after a blank line, so a wrapped paragraph line beginning with `-`, `>`,
  * ```` ``` ````, etc. stays folded into the paragraph just as the pipeline keeps it.
+ * The one exception is a `$$` display-math opener (see `isDisplayMathOpener`).
  */
 function startsNewBlock(line: string, inReferences: boolean): boolean {
   const s = line.trim();
@@ -312,8 +313,28 @@ function startsNewBlock(line: string, inReferences: boolean): boolean {
     HEADING_RE.test(line) ||
     IMAGE_LINE_RE.test(s) ||
     line.replace(/^\s+/, "").startsWith("|") ||
+    isDisplayMathOpener(s) ||
     (inReferences && REFERENCE_LINE_RE.test(s))
   );
+}
+
+/**
+ * Whether a (trimmed) source line opens a `$$…$$` display block: it starts with `$$` and
+ * either does not close on the same line (`$$`, `$$ E =`) or closes exactly at its end
+ * (`$$ E = mc^2 $$`). A line such as `$$x$$ 뒤 문장` is NOT an opener — it is ordinary
+ * paragraph text with an inline display pair, which `inline()` renders.
+ *
+ * Used both at the top of the block loop and as a paragraph break: a paragraph that runs
+ * straight into a `$$` line (no blank line between — the common way lecture notes are
+ * written) must end there, otherwise the `$$` lines fold into the paragraph, each source
+ * line is rendered on its own, and the delimiters never meet.
+ */
+function isDisplayMathOpener(s: string): boolean {
+  if (!s.startsWith("$$")) {
+    return false;
+  }
+  const close = s.indexOf("$$", 2);
+  return close < 0 || close === s.length - 2;
 }
 
 /** One `<br/>`-separated label line → a KaTeX fragment (text runs in `\text{}`, math kept). */
@@ -543,7 +564,7 @@ export function markdownToArticleHtml(md: string, options: RenderOptions): Rende
     // (delimiters stripped) is emitted as a display-math span. Handled before the
     // paragraph path so `$$` never reaches the inline scanner, where the single-`$`
     // regex would capture a stray leading `$` and leak the trailing `$`.
-    if (stripped.startsWith("$$")) {
+    if (isDisplayMathOpener(stripped)) {
       const single = DISPLAY_MATH_RE.exec(stripped);
       if (single) {
         // Whole equation on one line: `$$ … $$`.
@@ -551,14 +572,20 @@ export function markdownToArticleHtml(md: string, options: RenderOptions): Rende
         i += 1;
         continue;
       }
-      // Multi-line: collect from the opening `$$` until a line ending with `$$`.
+      // Multi-line: collect from the opening `$$` until the line that contains the closing
+      // `$$`. Text after the closing delimiter on that line (`$$ 뒤에 글`) is not part of the
+      // equation: it is handed back to the loop as the content of that same source line,
+      // so it renders as the following paragraph instead of leaking into the math.
       const mathLines: string[] = [stripped.slice(2)];
       i += 1;
       let closed = false;
+      let trailing = "";
       while (i < lines.length) {
         const cur = lines[i].trim();
-        if (cur.endsWith("$$")) {
-          mathLines.push(cur.slice(0, -2));
+        const close = cur.indexOf("$$");
+        if (close >= 0) {
+          mathLines.push(cur.slice(0, close));
+          trailing = cur.slice(close + 2).trim();
           i += 1;
           closed = true;
           break;
@@ -568,6 +595,10 @@ export function markdownToArticleHtml(md: string, options: RenderOptions): Rende
       }
       if (closed) {
         pushBlock(renderDisplayMath(mathLines.join("\n")));
+        if (trailing) {
+          i -= 1;
+          lines[i] = trailing;
+        }
         continue;
       }
       // No closing `$$` found: fall through and render the collected text as a

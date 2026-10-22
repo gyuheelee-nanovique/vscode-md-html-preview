@@ -20,9 +20,11 @@ as the standalone HTML exporter, so what you see while editing is what the expor
   Webview beside the editor and refreshes (debounced) as you type.
 - **Images** — relative image links are rewritten to Webview resource URIs (fast for
   live editing) or embedded as base64 (`mdHtmlPreview.embedImages`).
-- **KaTeX math** — inline `$…$` and `` ```math `` blocks render via KaTeX using a
-  conservative span-based approach that does **not** swallow citation brackets like
-  `[12]`.
+- **KaTeX math** — inline `$…$`, `$$…$$` display blocks and `` ```math `` blocks render
+  via KaTeX using a conservative span-based approach that does **not** swallow citation
+  brackets like `[12]`. A `$$` block may follow a paragraph line directly (no blank line
+  needed), and text after the closing `$$` on the same line becomes the next paragraph
+  (v0.5.1).
 - **Foldable references** — the `참고문헌` section is wrapped in `<details>` (open by
   default; configurable).
 - **Docling tables** — pipe tables, table captions (`표 N …`), and the special
